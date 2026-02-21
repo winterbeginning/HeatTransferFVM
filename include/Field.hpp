@@ -6,17 +6,18 @@
 #include "Mesh.hpp"
 
 // 边界条件结构
-struct BoundaryCondition
-{
-    double refValue; // 参考值 (如 T_left)
-    double refGrad;  // 参考梯度 (如 q/k)
-    double fraction; // 1.0 = Dirichlet, 0.0 = Neumann
-};
 
 // 场类：模拟 OpenFOAM 的 volField
 template <typename valType>
 class Field
 {
+    struct BoundaryCondition
+    {
+        valType refValue; // 参考值 (如 T_left)
+        valType refGrad;  // 参考梯度 (如 q/k)
+        double fraction;  // 1.0 = Dirichlet, 0.0 = Neumann
+    };
+
 public:
     std::string name;
     const Mesh& mesh;
@@ -41,8 +42,8 @@ public:
 
     // 设置指定边界的条件
     void setBoundary(const std::string& patchName,
-                     double refV,
-                     double refG,
+                     valType refV,
+                     valType refG,
                      double frac)
     {
         for (size_t i = 0; i < mesh.boundary.size(); ++i)

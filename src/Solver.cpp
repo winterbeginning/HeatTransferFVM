@@ -1,25 +1,22 @@
 #include "Solver.hpp"
 #include <iostream>
 
-std::vector<double> Solver::solve(SolverType type,
-                                  const SpaceMatrix& A,
+std::vector<double> Solver::solve(const SpaceMatrix& A,
                                   const std::vector<double>& b,
-                                  const std::vector<double>& x0,
-                                  int maxIter,
-                                  double tol)
+                                  const std::vector<double>& x0)
 {
-    switch (type)
+    switch (solverType)
     {
     case SolverType::JACOBI:
-        return jacobi(A, b, x0, maxIter, tol);
+        return jacobi(A, b, x0);
     case SolverType::GAUSS_SEIDEL:
-        return gaussSeidel(A, b, x0, maxIter, tol);
+        return gaussSeidel(A, b, x0);
     case SolverType::CG:
-        return conjugateGradient(A, b, x0, maxIter, tol);
+        return conjugateGradient(A, b, x0);
     case SolverType::BICGSTAB:
-        return bicgstab(A, b, x0, maxIter, tol);
+        return bicgstab(A, b, x0);
     default:
-        return conjugateGradient(A, b, x0, maxIter, tol);
+        return conjugateGradient(A, b, x0);
     }
 }
 
@@ -38,9 +35,7 @@ double Solver::norm(const std::vector<double>& v)
 
 std::vector<double> Solver::jacobi(const SpaceMatrix& A,
                                    const std::vector<double>& b,
-                                   const std::vector<double>& x0,
-                                   int maxIter,
-                                   double tol)
+                                   const std::vector<double>& x0)
 {
     std::vector<double> x =
         (x0.size() == A.n) ? x0 : std::vector<double>(A.n, 0.0);
@@ -62,10 +57,15 @@ std::vector<double> Solver::jacobi(const SpaceMatrix& A,
         std::vector<double> r = A.multiply(x);
         for (int i = 0; i < A.n; ++i)
             r[i] -= b[i];
-        if (norm(r) < tol)
-        {
-            std::cout << "Jacobi converged in " << iter << " iterations."
+        double res = norm(r);
+        if (verbose && iter % 100 == 0)
+            std::cout << "[Jacobi] Iter " << iter << ", Residual: " << res
                       << std::endl;
+        if (res < tol)
+        {
+            if (verbose)
+                std::cout << "[Jacobi] converged in " << iter
+                          << " iterations, Final Res: " << res << std::endl;
             return x;
         }
     }
@@ -74,9 +74,7 @@ std::vector<double> Solver::jacobi(const SpaceMatrix& A,
 
 std::vector<double> Solver::gaussSeidel(const SpaceMatrix& A,
                                         const std::vector<double>& b,
-                                        const std::vector<double>& x0,
-                                        int maxIter,
-                                        double tol)
+                                        const std::vector<double>& x0)
 {
     std::vector<double> x =
         (x0.size() == A.n) ? x0 : std::vector<double>(A.n, 0.0);
@@ -96,10 +94,15 @@ std::vector<double> Solver::gaussSeidel(const SpaceMatrix& A,
         std::vector<double> r = A.multiply(x);
         for (int i = 0; i < A.n; ++i)
             r[i] -= b[i];
-        if (norm(r) < tol)
-        {
-            std::cout << "Gauss-Seidel converged in " << iter << " iterations."
+        double res = norm(r);
+        if (verbose && iter % 100 == 0)
+            std::cout << "[Gauss-Seidel] Iter " << iter << ", Residual: " << res
                       << std::endl;
+        if (res < tol)
+        {
+            if (verbose)
+                std::cout << "[Gauss-Seidel] converged in " << iter
+                          << " iterations, Final Res: " << res << std::endl;
             return x;
         }
     }
@@ -108,9 +111,7 @@ std::vector<double> Solver::gaussSeidel(const SpaceMatrix& A,
 
 std::vector<double> Solver::conjugateGradient(const SpaceMatrix& A,
                                               const std::vector<double>& b,
-                                              const std::vector<double>& x0,
-                                              int maxIter,
-                                              double tol)
+                                              const std::vector<double>& x0)
 {
     std::vector<double> x =
         (x0.size() == A.n) ? x0 : std::vector<double>(A.n, 0.0);
@@ -135,10 +136,15 @@ std::vector<double> Solver::conjugateGradient(const SpaceMatrix& A,
             r[i] -= alpha * Ap[i];
         }
         double rsnew = dot(r, r);
-        if (std::sqrt(rsnew) < tol)
-        {
-            std::cout << "CG converged in " << iter << " iterations."
+        double res = std::sqrt(rsnew);
+        if (verbose && iter % 100 == 0)
+            std::cout << "[CG] Iter " << iter << ", Residual: " << res
                       << std::endl;
+        if (res < tol)
+        {
+            if (verbose)
+                std::cout << "[CG] converged in " << iter
+                          << " iterations, Final Res: " << res << std::endl;
             return x;
         }
         for (int i = 0; i < A.n; ++i)
@@ -152,9 +158,7 @@ std::vector<double> Solver::conjugateGradient(const SpaceMatrix& A,
 
 std::vector<double> Solver::bicgstab(const SpaceMatrix& A,
                                      const std::vector<double>& b,
-                                     const std::vector<double>& x0,
-                                     int maxIter,
-                                     double tol)
+                                     const std::vector<double>& x0)
 {
     std::vector<double> x =
         (x0.size() == A.n) ? x0 : std::vector<double>(A.n, 0.0);
@@ -193,12 +197,14 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& A,
         for (int i = 0; i < A.n; ++i)
             s[i] = r[i] - alpha * v[i];
 
-        if (norm(s) < tol)
+        double res_s = norm(s);
+        if (res_s < tol)
         {
             for (int i = 0; i < A.n; ++i)
                 x[i] += alpha * p[i];
-            std::cout << "BiCGSTAB (early) converged in " << iter
-                      << " iterations." << std::endl;
+            if (verbose)
+                std::cout << "[BiCGSTAB] (early) converged in " << iter
+                          << " iterations, Final Res: " << res_s << std::endl;
             return x;
         }
 
@@ -214,10 +220,16 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& A,
             r[i] = s[i] - omega * t[i];
         }
 
-        if (norm(r) < tol)
-        {
-            std::cout << "BiCGSTAB converged in " << iter << " iterations."
+        double res = norm(r);
+        if (verbose && iter % 100 == 0)
+            std::cout << "[BiCGSTAB] Iter " << iter << ", Residual: " << res
                       << std::endl;
+        if (res < tol)
+        {
+            if (verbose)
+                std::cout << "[BiCGSTAB] converged in " << iter
+                          << " iterations, Final Res: " << res << std::endl;
+
             return x;
         }
     }

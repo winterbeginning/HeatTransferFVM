@@ -4,15 +4,64 @@
 #include <algorithm>
 #include <cmath>
 
-void FiniteVolume::assembleSource(SpaceMatrix& A, std::vector<double>& b)
+void FiniteVolume::assembleDiv(SpaceMatrix& A, std::vector<double>& b)
 {
-    for (size_t i = 0; i < mesh.numCells; i++)
+    for (int i = 0; i < mesh.nInternalFace; ++i)
     {
-        b[i] += SourceT[i] * mesh.cellVolumes[i];
+        int o = mesh.owner[i];
+        int n = mesh.neighbour[i];
+        double area = mesh.faceAreas[i];
+        Vector areaDirect = mesh.faceNormals[i];
+        Vector U_face = (U[o] + U[n]) / 2.0;
+
+        double flux = rho * U_face.dotWith(areaDirect) * area;
+
+        if (flux > 0) // 流动方向 o --> n   面变量等于o单元
+        {
+            A.addValue(o, o, flux); // o单元方程，面变量来自o，流出为正
+            A.addValue(n, o, -flux); // n单元方程，面变量来自o，流入为负
+        }
+        else // 流动方向 n --> o   面变量等于n单元
+        {
+            A.addValue(o, n, flux); // o单元方程，面变量来自n，流入为正
+            A.addValue(n, n, -flux); // n单元方程，面变量来自n，流出为负
+        };
+    }
+
+    for (int pIdx = 0; pIdx < mesh.boundary.size(); ++pIdx)
+    {
+        const auto& patch = mesh.boundary[pIdx];
+        const auto& Ubc = U.boundaryField[pIdx];
+        const auto& phi_bc = T.boundaryField[pIdx];
+        for (int i = patch.firstFaceIdx; i < patch.firstFaceIdx + patch.nFaces;
+             ++i)
+        {
+            int o = mesh.owner[i];
+            double area = mesh.faceAreas[i];
+            Vector areaDirect = mesh.faceNormals[i];
+            double d = (mesh.faceCentres[i] - mesh.cellCentres[o]).getMag();
+            Vector U_face = Ubc.fraction * Ubc.refValue +
+                            (1.0 - Ubc.fraction) * (U[o] + Ubc.refGrad * d);
+
+            double phi_face =
+                phi_bc.fraction * phi_bc.refValue +
+                (1.0 - phi_bc.fraction) * (T[o] + phi_bc.refGrad * d);
+
+            double flux = rho * U_face.dotWith(areaDirect) * area;
+
+            if (flux > 0) // 流出
+            {
+                A.addValue(o, o, flux);
+            }
+            else // 流入
+            {
+                b[o] -= flux * phi_face;
+            };
+        }
     }
 }
 
-void FiniteVolume::assembleSteady(SpaceMatrix& A, std::vector<double>& b)
+void FiniteVolume::assembleLaplacian(SpaceMatrix& A, std::vector<double>& b)
 {
     // 1. 处理内部面
     for (int i = 0; i < mesh.nInternalFace; ++i)
@@ -51,64 +100,35 @@ void FiniteVolume::assembleSteady(SpaceMatrix& A, std::vector<double>& b)
     }
 }
 
-void FiniteVolume::assembleImplicit(SpaceMatrix& A,
-                                    std::vector<double>& b,
-                                    double dt)
+void FiniteVolume::assembleSource(SpaceMatrix& A, std::vector<double>& b)
 {
-    assembleSteady(A, b);
-    for (int i = 0; i < mesh.numCells; ++i)
+    for (size_t i = 0; i < mesh.numCells; i++)
     {
-        double trans = mesh.cellVolumes[i] * rhoCp / dt;
-        A.addValue(i, i, trans);
-        b[i] += trans * T_old[i];
+        b[i] += SourceT[i] * mesh.cellVolumes[i];
     }
 }
 
-void FiniteVolume::stepExplicit(double dt)
+void FiniteVolume::assembleSpace(SpaceMatrix& A, std::vector<double>& b)
 {
-    std::vector<double> T_new = T.internalField;
-    std::vector<double> cellFlux(mesh.numCells, 0.0);
+    if (Convective)
+        assembleDiv(A, b);
+    if (Diffusive)
+        assembleLaplacian(A, b);
+    if (Source)
+        assembleSource(A, b);
+}
 
-    // 1. 内部面通量
-    for (int i = 0; i < mesh.nInternalFace; ++i)
-    {
-        int o = mesh.owner[i];
-        int n = mesh.neighbour[i];
-        double area = mesh.faceAreas[i];
-        double dist = (mesh.cellCentres[n] - mesh.cellCentres[o]).getMag();
-
-        double flux = k * area * (T[n] - T[o]) / dist;
-        cellFlux[o] += flux;
-        cellFlux[n] -= flux;
-    }
-
-    // 2. 边界面通量
-    for (int pIdx = 0; pIdx < mesh.boundary.size(); ++pIdx)
-    {
-        const auto& patch = mesh.boundary[pIdx];
-        const auto& bc = T.boundaryField[pIdx];
-        for (int i = patch.firstFaceIdx; i < patch.firstFaceIdx + patch.nFaces;
-             ++i)
-        {
-            int o = mesh.owner[i];
-            double area = mesh.faceAreas[i];
-            double d = (mesh.faceCentres[i] - mesh.cellCentres[o]).getMag();
-
-            double Tf = bc.fraction * bc.refValue +
-                        (1.0 - bc.fraction) * (T[o] + bc.refGrad * d);
-            double flux = k * area * (Tf - T[o]) / d;
-            cellFlux[o] += flux;
-        }
-    }
-
+void FiniteVolume::assembleTime(SpaceMatrix& A,
+                                std::vector<double>& b,
+                                double dt)
+{
+    assembleSpace(A, b);
     for (int i = 0; i < mesh.numCells; ++i)
     {
-        if (mesh.cellVolumes[i] > 1e-20)
-            T_new[i] =
-                T[i] + (dt / (rhoCp * mesh.cellVolumes[i])) * cellFlux[i];
+        double trans = mesh.cellVolumes[i] * rho * Cp / dt;
+        A.addValue(i, i, trans);
+        b[i] += trans * T_old[i];
     }
-    T.internalField = T_new;
-    T_old.internalField = T_new;
 }
 
 void FiniteVolume::prepareConnectivity()
@@ -162,17 +182,17 @@ void FiniteVolume::prepareConnectivity()
     }
 }
 
-void FiniteVolume::solve(TimeScheme ts, SolverType st, double dt, int maxSteps)
+void FiniteVolume::solve(TimeScheme ts, Solver& solver, int maxSteps, double dt)
 {
     prepareConnectivity();
 
     if (ts == TimeScheme::STEADY)
     {
+        writeToTec("out_init.plt");
         SpaceMatrix A(mesh.numCells);
         std::vector<double> b(mesh.numCells, 0.0);
-        assembleSteady(A, b);
-        assembleSource(A, b);
-        T.internalField = Solver::solve(st, A, b, T.internalField);
+        assembleSpace(A, b);
+        T.internalField = solver.solve(A, b, T.internalField);
         writeToTec("out_steady.plt", 50.0);
     }
     else if (ts == TimeScheme::IMPLICIT)
@@ -181,23 +201,9 @@ void FiniteVolume::solve(TimeScheme ts, SolverType st, double dt, int maxSteps)
         {
             SpaceMatrix A(mesh.numCells);
             std::vector<double> b(mesh.numCells, 0.0);
-            assembleImplicit(A, b, dt);
-            assembleSource(A, b);
-            T.internalField = Solver::solve(st, A, b, T.internalField);
+            assembleTime(A, b, dt);
+            T.internalField = solver.solve(A, b, T.internalField);
             T_old.internalField = T.internalField;
-            if (step % 5 == 0)
-            {
-                std::cout << "Time step " << step << " done." << std::endl;
-                writeToTec("out_" + std::to_string(step) + ".plt",
-                           (double)step * dt);
-            }
-        }
-    }
-    else if (ts == TimeScheme::EXPLICIT)
-    {
-        for (int step = 0; step <= maxSteps; ++step)
-        {
-            stepExplicit(dt);
             if (step % 5 == 0)
             {
                 std::cout << "Time step " << step << " done." << std::endl;
@@ -225,13 +231,15 @@ void FiniteVolume::writeToTec(const string& filePath, double time)
 
     // 1. 写入文件头
     outfile << "TITLE = \"Heat Transfer FVM Results\"" << std::endl;
-    outfile << "VARIABLES = \"X\", \"Y\", \"T\"" << std::endl;
+    outfile << "VARIABLES = \"X\", \"Y\", \"T\", \"Vx\", \"Vy\", \"Vz\""
+            << std::endl;
 
     // 2. 写入区域头 (ZONE)
-    outfile << "ZONE T=\"InternalField\", NODES=" << nNodes
-            << ", ELEMENTS=" << nElems << ", DATAPACKING=BLOCK, "
-            << "ZONETYPE=FEQUADRILATERAL, VARLOCATION=([3]=CELLCENTERED), "
-            << "STRANDID=1, SOLUTIONTIME=" << time << std::endl;
+    outfile
+        << "ZONE T=\"InternalField\", NODES=" << nNodes
+        << ", ELEMENTS=" << nElems << ", DATAPACKING=BLOCK, "
+        << "ZONETYPE=FEQUADRILATERAL, VARLOCATION=([3,4,5,6]=CELLCENTERED), "
+        << "STRANDID=1, SOLUTIONTIME=" << time << std::endl;
 
     // 3. 写入节点 X 坐标
     for (int i = 0; i < nNodes; ++i)
@@ -244,9 +252,9 @@ void FiniteVolume::writeToTec(const string& filePath, double time)
     outfile << "\n";
 
     // 5. 写入变量 T (CELLCENTERED)
-    for (int i = 0; i < nElems; ++i)
-        outfile << T[i] << ((i + 1) % 10 == 0 ? "\n" : " ");
-    outfile << "\n";
+    writeField(outfile, nElems, T);
+
+    writeField(outfile, nElems, U);
 
     // 6. 使用缓存的 Connectivity
     for (int i = 0; i < nElems; ++i)

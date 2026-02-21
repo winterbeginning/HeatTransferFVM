@@ -14,37 +14,43 @@ enum class SolverType
 
 class Solver
 {
+private:
+    int maxIter;
+    double tol;
+    bool verbose;
+    SolverType solverType;
+
 public:
-    static std::vector<double> solve(SolverType type,
-                                     const SpaceMatrix& A,
-                                     const std::vector<double>& b,
-                                     const std::vector<double>& x0 = {},
-                                     int maxIter = 1000,
-                                     double tol = 1e-6);
-    static std::vector<double> jacobi(const SpaceMatrix& A,
-                                      const std::vector<double>& b,
-                                      const std::vector<double>& x0 = {},
-                                      int maxIter = 1000,
-                                      double tol = 1e-6);
-    static std::vector<double> gaussSeidel(const SpaceMatrix& A,
-                                           const std::vector<double>& b,
-                                           const std::vector<double>& x0 = {},
-                                           int maxIter = 1000,
-                                           double tol = 1e-6);
-    static std::vector<double>
-    conjugateGradient(const SpaceMatrix& A,
-                      const std::vector<double>& b,
-                      const std::vector<double>& x0 = {},
-                      int maxIter = 1000,
-                      double tol = 1e-6);
-    static std::vector<double> bicgstab(const SpaceMatrix& A,
-                                        const std::vector<double>& b,
-                                        const std::vector<double>& x0 = {},
-                                        int maxIter = 1000,
-                                        double tol = 1e-6);
+    Solver(int maxIter = 1000,
+           double tol = 1e-6,
+           bool verbose = true,
+           SolverType solverType = SolverType::GAUSS_SEIDEL)
+        : maxIter(maxIter),
+          tol(tol),
+          verbose(verbose),
+          solverType(solverType){};
+
+    std::vector<double> solve(const SpaceMatrix& A,
+                              const std::vector<double>& b,
+                              const std::vector<double>& x0 = {});
+
+    std::vector<double> jacobi(const SpaceMatrix& A,
+                               const std::vector<double>& b,
+                               const std::vector<double>& x0 = {});
+
+    std::vector<double> gaussSeidel(const SpaceMatrix& A,
+                                    const std::vector<double>& b,
+                                    const std::vector<double>& x0 = {});
+
+    std::vector<double> conjugateGradient(const SpaceMatrix& A,
+                                          const std::vector<double>& b,
+                                          const std::vector<double>& x0 = {});
+
+    std::vector<double> bicgstab(const SpaceMatrix& A,
+                                 const std::vector<double>& b,
+                                 const std::vector<double>& x0 = {});
 
 private:
-    static double dot(const std::vector<double>& v1,
-                      const std::vector<double>& v2);
-    static double norm(const std::vector<double>& v);
+    double dot(const std::vector<double>& v1, const std::vector<double>& v2);
+    double norm(const std::vector<double>& v);
 };

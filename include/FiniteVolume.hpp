@@ -3,11 +3,11 @@
 #include "Mesh.hpp"
 #include "Solver.hpp"
 #include "Field.hpp"
+#include "Point3D.hpp"
 
 enum class TimeScheme
 {
     STEADY,
-    EXPLICIT,
     IMPLICIT
 };
 
@@ -15,36 +15,82 @@ class FiniteVolume
 {
 public:
     const Mesh& mesh;
-    double k;     // Thermal conductivity
-    double rhoCp; // Density * heat capacity
+    double k; // Thermal conductivity
+    double rho;
+    double Cp;
+    double mu;
+    bool Convective;
+    bool Diffusive;
+    bool Source;
 
     Field<double> T;
     Field<double> T_old;
     Field<double> SourceT;
+    Field<Vector> U;
 
-    FiniteVolume(const Mesh& mesh, double k, double rhoCp)
+    FiniteVolume(const Mesh& mesh)
         : mesh(mesh),
-          k(k),
-          rhoCp(rhoCp),
+          k(1.0),
+          rho(1.0),
+          Cp(1.0),
+          mu(1.0),
+          Convective(false),
+          Diffusive(true),
+          Source(true),
           T("T", mesh),
           T_old("Told", mesh),
-          SourceT("sourceT", mesh, 0.0)
+          SourceT("sourceT", mesh, 0.0),
+          U("U", mesh, Vector(1.0, 1.0, 0))
     {
     }
 
-    void solve(TimeScheme ts,
-               SolverType st = SolverType::CG,
-               double dt = 0.0,
-               int maxSteps = 1);
+    void
+    solve(TimeScheme ts, Solver& solver, int maxSteps = 20, double dt = 0.1);
 
     void writeToTec(const string& filePath = "out.dat", double time = 0.0);
+
+    void setSolveOption(bool Convective, bool Diffusive, bool Source)
+    {
+        this->Convective = Convective;
+        this->Diffusive = Diffusive;
+        this->Source = Source;
+    }
+
+    void setProperties(double k, double rho, double Cp, double mu)
+    {
+        this->k = k;
+        this->rho = rho;
+        this->Cp = Cp;
+        this->mu = mu;
+    }
 
 private:
     std::vector<std::vector<int>> cachedConnectivity;
     void prepareConnectivity();
 
+    void assembleDiv(SpaceMatrix& A, std::vector<double>& b);
+    void assembleLaplacian(SpaceMatrix& A, std::vector<double>& b);
     void assembleSource(SpaceMatrix& A, std::vector<double>& b);
-    void assembleSteady(SpaceMatrix& A, std::vector<double>& b);
-    void assembleImplicit(SpaceMatrix& A, std::vector<double>& b, double dt);
-    void stepExplicit(double dt);
+    void assembleSpace(SpaceMatrix& A, std::vector<double>& b);
+    void assembleTime(SpaceMatrix& A, std::vector<double>& b, double dt);
+
+    void writeField(ofstream& outfile, int nElements, Field<double> field)
+    {
+        for (int i = 0; i < nElements; ++i)
+            outfile << field[i] << ((i + 1) % 10 == 0 ? "\n" : " ");
+        outfile << "\n";
+    };
+
+    void writeField(ofstream& outfile, int nElements, Field<Vector> field)
+    {
+        for (int i = 0; i < nElements; ++i)
+            outfile << field[i].x << ((i + 1) % 10 == 0 ? "\n" : " ");
+        outfile << "\n";
+        for (int i = 0; i < nElements; ++i)
+            outfile << field[i].y << ((i + 1) % 10 == 0 ? "\n" : " ");
+        outfile << "\n";
+        for (int i = 0; i < nElements; ++i)
+            outfile << field[i].z << ((i + 1) % 10 == 0 ? "\n" : " ");
+        outfile << "\n";
+    };
 };
