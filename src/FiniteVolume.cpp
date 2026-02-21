@@ -4,6 +4,14 @@
 #include <algorithm>
 #include <cmath>
 
+void FiniteVolume::assembleSource(SpaceMatrix& A, std::vector<double>& b)
+{
+    for (size_t i = 0; i < mesh.numCells; i++)
+    {
+        b[i] += SourceT[i] * mesh.cellVolumes[i];
+    }
+}
+
 void FiniteVolume::assembleSteady(SpaceMatrix& A, std::vector<double>& b)
 {
     // 1. 处理内部面
@@ -109,7 +117,7 @@ void FiniteVolume::prepareConnectivity()
         return;
 
     cachedConnectivity.assign(mesh.numCells, std::vector<int>());
-    for (int f = 0; f < mesh.facePoints.size(); ++f)
+    for (int f = 0; f < (int)mesh.facePoints.size(); ++f)
     {
         int o = mesh.owner[f];
         for (int p : mesh.facePoints[f])
@@ -120,6 +128,7 @@ void FiniteVolume::prepareConnectivity()
                 cachedConnectivity[o].push_back(p);
         }
 
+        // 仅处理内部面对应的邻居单元
         if (f < mesh.nInternalFace)
         {
             int n = mesh.neighbour[f];
@@ -162,39 +171,37 @@ void FiniteVolume::solve(TimeScheme ts, SolverType st, double dt, int maxSteps)
         SpaceMatrix A(mesh.numCells);
         std::vector<double> b(mesh.numCells, 0.0);
         assembleSteady(A, b);
+        assembleSource(A, b);
         T.internalField = Solver::solve(st, A, b, T.internalField);
-        writeToTec("out_steady.dat", 0.0);
+        writeToTec("out_steady.plt", 50.0);
     }
     else if (ts == TimeScheme::IMPLICIT)
     {
-        int step = 1;
-        writeToTec("out_" + std::to_string(step) + ".dat", (double)step * dt);
-        for (; step <= maxSteps; ++step)
+        for (int step = 0; step <= maxSteps; ++step)
         {
             SpaceMatrix A(mesh.numCells);
             std::vector<double> b(mesh.numCells, 0.0);
             assembleImplicit(A, b, dt);
+            assembleSource(A, b);
             T.internalField = Solver::solve(st, A, b, T.internalField);
             T_old.internalField = T.internalField;
             if (step % 5 == 0)
             {
                 std::cout << "Time step " << step << " done." << std::endl;
-                writeToTec("out_" + std::to_string(step) + ".dat",
+                writeToTec("out_" + std::to_string(step) + ".plt",
                            (double)step * dt);
             }
         }
     }
     else if (ts == TimeScheme::EXPLICIT)
     {
-        int step = 1;
-        writeToTec("out_" + std::to_string(step) + ".dat", (double)step * dt);
-        for (; step <= maxSteps; ++step)
+        for (int step = 0; step <= maxSteps; ++step)
         {
             stepExplicit(dt);
             if (step % 5 == 0)
             {
                 std::cout << "Time step " << step << " done." << std::endl;
-                writeToTec("out_" + std::to_string(step) + ".dat",
+                writeToTec("out_" + std::to_string(step) + ".plt",
                            (double)step * dt);
             }
         }

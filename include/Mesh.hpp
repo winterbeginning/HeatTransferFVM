@@ -325,56 +325,100 @@ public:
         file.close();
     };
 
-    // 通用的几何属性计算函数
+    // 通用的几何属性计算函数，支持二维(Z=0)和三维网格
     void calculateGeometry()
     {
         numCells = 0;
         for (int o : owner)
             numCells = std::max(numCells, o + 1);
         for (int n : neighbour)
-            numCells = std::max(numCells, n + 1);
+            if (n != -1)
+                numCells = std::max(numCells, n + 1);
+
+        // 1.
+        // 自动判断维度：检查网格是否本质上是二维的（所有面是否只有2个点，或者Z坐标是否全为0）
+        bool is2D = true;
+        for (const auto& fp : facePoints)
+        {
+            if (fp.size() > 2)
+            {
+                is2D = false;
+                break;
+            }
+        }
+        if (is2D)
+        {
+            // 进一步检查所有点的 Z 坐标是否有变化
+            for (const auto& p : points)
+            {
+                if (std::abs(p.z) > 1e-12)
+                {
+                    is2D = false;
+                    break;
+                }
+            }
+        }
 
         int nFaces = facePoints.size();
         faceCentres.assign(nFaces, Vector(0, 0, 0));
         faceAreas.assign(nFaces, 0.0);
         faceNormals.assign(nFaces, Vector(0, 0, 0));
 
+        // 2. 计算面属性
         for (int i = 0; i < nFaces; ++i)
         {
+            const auto& verts = facePoints[i];
             Vector center(0, 0, 0);
-            for (int vid : facePoints[i])
+            for (int vid : verts)
                 center = center + points[vid];
-            faceCentres[i] = center / (double)facePoints[i].size();
+            faceCentres[i] = center / (double)verts.size();
 
-            // 2D 简化：计算面长度和法向量 (假设面由两个点组成)
-            if (facePoints[i].size() >= 2)
+            if (is2D && verts.size() == 2)
             {
-                Vector p1 = points[facePoints[i][0]];
-                Vector p2 = points[facePoints[i][1]];
+                // 二维逻辑：面是线段
+                Vector p1 = points[verts[0]];
+                Vector p2 = points[verts[1]];
                 Vector dP = p2 - p1;
                 faceAreas[i] = dP.getMag();
-                // 默认法向量 (dy, -dx, 0)
+                // 默认法向：在XY平面内旋转90度 (dy, -dx, 0)
                 faceNormals[i] = Vector(dP.y, -dP.x, 0.0);
-                if (faceNormals[i].getMag() > 1e-15)
-                    faceNormals[i] = faceNormals[i] / faceNormals[i].getMag();
             }
+            else
+            {
+                // 三维逻辑：面是多边形
+                // 使用三角形扇形法计算矢量面积 (Vector Area)
+                Vector vectorArea(0, 0, 0);
+                for (size_t v = 0; v < verts.size(); ++v)
+                {
+                    Vector v1 = points[verts[v]] - faceCentres[i];
+                    Vector v2 =
+                        points[verts[(v + 1) % verts.size()]] - faceCentres[i];
+                    vectorArea = vectorArea + v1.crossWith(v2);
+                }
+                vectorArea = vectorArea * 0.5;
+                faceAreas[i] = vectorArea.getMag();
+                faceNormals[i] = vectorArea / (faceAreas[i] + 1e-20);
+            }
+
+            if (faceNormals[i].getMag() > 1e-15)
+                faceNormals[i] = faceNormals[i] / faceNormals[i].getMag();
         }
 
         cellCentres.assign(numCells, Vector(0, 0, 0));
         cellVolumes.assign(numCells, 0.0);
-
-        // 计算单元中心（平均面中心，简单处理）
         std::vector<int> faceCount(numCells, 0);
+
+        // 3. 初步计算单元中心（面的平均中心）
         for (int i = 0; i < nFaces; ++i)
         {
             cellCentres[owner[i]] = cellCentres[owner[i]] + faceCentres[i];
             faceCount[owner[i]]++;
-            if (neighbour[i] != -1)
-            {
-                cellCentres[neighbour[i]] =
-                    cellCentres[neighbour[i]] + faceCentres[i];
-                faceCount[neighbour[i]]++;
-            }
+        }
+        for (size_t i = 0; i < neighbour.size(); ++i)
+        {
+            cellCentres[neighbour[i]] =
+                cellCentres[neighbour[i]] + faceCentres[i];
+            faceCount[neighbour[i]]++;
         }
         for (int i = 0; i < numCells; ++i)
         {
@@ -382,23 +426,26 @@ public:
                 cellCentres[i] = cellCentres[i] / (double)faceCount[i];
         }
 
-        // 修正法向量方向并计算单元体积 (2D 为面积)
+        // 4. 修正法向量方向并计算单元体积/面积
+        // 使用散度定理: V = 1/d * sum( (Rf - Rc) . n * Af )
+        double dimInv = is2D ? 0.5 : (1.0 / 3.0);
+
         for (int i = 0; i < nFaces; ++i)
         {
-            Vector vec = faceCentres[i] - cellCentres[owner[i]];
-            if (vec.dotWith(faceNormals[i]) < 0)
+            // 确保法向量从 owner 指向 neighbour
+            Vector dC = faceCentres[i] - cellCentres[owner[i]];
+            if (dC.dotWith(faceNormals[i]) < 0)
                 faceNormals[i] = faceNormals[i] * -1.0;
 
-            // 累积单元体积贡献 (散度定理: V = 1/d * sum(x * n * A))
-            double dot = (faceCentres[i] - cellCentres[owner[i]])
-                             .dotWith(faceNormals[i]);
-            cellVolumes[owner[i]] += 0.5 * dot * faceAreas[i];
-
-            if (neighbour[i] != -1)
+            // 累加对 owner 的体积贡献
+            double dot_o = (faceCentres[i] - cellCentres[owner[i]])
+                               .dotWith(faceNormals[i]);
+            cellVolumes[owner[i]] += dimInv * dot_o * faceAreas[i];
+            if (i < neighbour.size())
             {
                 double dot_n = (faceCentres[i] - cellCentres[neighbour[i]])
                                    .dotWith(faceNormals[i] * -1.0);
-                cellVolumes[neighbour[i]] += 0.5 * dot_n * faceAreas[i];
+                cellVolumes[neighbour[i]] += dimInv * dot_n * faceAreas[i];
             }
         }
     }

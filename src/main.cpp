@@ -5,13 +5,16 @@
 
 int main()
 {
-    int nx = 10, ny = 10;
+    std::cout << "--- Steady State Heat Conduction ---" << std::endl;
+    int nx = 50, ny = 50;
     Mesh mesh;
     mesh.createSquareMesh(nx, ny, 1.0, 1.0);
+    std::cout << "--- Mesh Cells " << mesh.numCells << " ---" << std::endl;
 
     FiniteVolume fvm(mesh, 1.0, 1.0);
 
     Field<double>& T = fvm.T;
+    Field<double>& SourceT = fvm.SourceT;
 
     // 设置边界条件：现在与 Mesh 的 Patch 名字强关联
     T.setBoundary("left", 100.0, 0.0, 1.0);
@@ -22,10 +25,20 @@ int main()
     // 设置初始值
     T.fill(20.0);
 
-    std::cout << "--- Steady State Heat Conduction (CG) ---" << std::endl;
-    // fvm.solve(TimeScheme::STEADY, SolverType::CG);
+    for (size_t i = 0; i < mesh.numCells; i++)
+    {
+        if (mesh.cellCentres[i].x > 0.4 && mesh.cellCentres[i].x < 0.6 &&
+            mesh.cellCentres[i].y > 0.4 && mesh.cellCentres[i].y < 0.6)
+        {
+            SourceT[i] = 1500.0;
+        }
+    }
 
-    fvm.solve(TimeScheme::IMPLICIT, SolverType::BICGSTAB, 0.02, 20);
+    fvm.writeToTec("out_init.plt");
+
+    fvm.solve(TimeScheme::STEADY, SolverType::BICGSTAB);
+
+    // fvm.solve(TimeScheme::IMPLICIT, SolverType::BICGSTAB, 0.02, 20);
 
     return 0;
 }

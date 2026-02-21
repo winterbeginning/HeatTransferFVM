@@ -20,9 +20,15 @@ public:
 
     Field<double> T;
     Field<double> T_old;
+    Field<double> SourceT;
 
     FiniteVolume(const Mesh& mesh, double k, double rhoCp)
-        : mesh(mesh), k(k), rhoCp(rhoCp), T("T", mesh), T_old("Told", mesh)
+        : mesh(mesh),
+          k(k),
+          rhoCp(rhoCp),
+          T("T", mesh),
+          T_old("Told", mesh),
+          SourceT("sourceT", mesh, 0.0)
     {
     }
 
@@ -37,6 +43,7 @@ private:
     std::vector<std::vector<int>> cachedConnectivity;
     void prepareConnectivity();
 
+    void assembleSource(SpaceMatrix& A, std::vector<double>& b);
     void assembleSteady(SpaceMatrix& A, std::vector<double>& b);
     void assembleImplicit(SpaceMatrix& A, std::vector<double>& b, double dt);
     void stepExplicit(double dt);
