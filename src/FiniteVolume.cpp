@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
-void FiniteVolume::assembleDiv(SpaceMatrix& A, std::vector<double>& b)
+void FiniteVolume::assembleDiv(SpaceMatrix& Eqn)
 {
     for (int i = 0; i < mesh.nInternalFace; ++i)
     {
@@ -18,13 +18,13 @@ void FiniteVolume::assembleDiv(SpaceMatrix& A, std::vector<double>& b)
 
         if (flux > 0) // 流动方向 o --> n   面变量等于o单元
         {
-            A.addValue(o, o, flux); // o单元方程，面变量来自o，流出为正
-            A.addValue(n, o, -flux); // n单元方程，面变量来自o，流入为负
+            Eqn.addToA(o, o, flux); // o单元方程，面变量来自o，流出为正
+            Eqn.addToA(n, o, -flux); // n单元方程，面变量来自o，流入为负
         }
         else // 流动方向 n --> o   面变量等于n单元
         {
-            A.addValue(o, n, flux); // o单元方程，面变量来自n，流入为正
-            A.addValue(n, n, -flux); // n单元方程，面变量来自n，流出为负
+            Eqn.addToA(o, n, flux); // o单元方程，面变量来自n，流入为正
+            Eqn.addToA(n, n, -flux); // n单元方程，面变量来自n，流出为负
         };
     }
 
@@ -51,17 +51,17 @@ void FiniteVolume::assembleDiv(SpaceMatrix& A, std::vector<double>& b)
 
             if (flux > 0) // 流出
             {
-                A.addValue(o, o, flux);
+                Eqn.addToA(o, o, flux);
             }
             else // 流入
             {
-                b[o] -= flux * phi_face;
+                Eqn.addTob(o, -flux * phi_face);
             };
         }
     }
 }
 
-void FiniteVolume::assembleLaplacian(SpaceMatrix& A, std::vector<double>& b)
+void FiniteVolume::assembleLaplacian(SpaceMatrix& Eqn)
 {
     // 1. 处理内部面
     for (int i = 0; i < mesh.nInternalFace; ++i)
@@ -72,10 +72,10 @@ void FiniteVolume::assembleLaplacian(SpaceMatrix& A, std::vector<double>& b)
         double dist = (mesh.cellCentres[n] - mesh.cellCentres[o]).getMag();
         double coeff = k * area / dist;
 
-        A.addValue(o, o, coeff);
-        A.addValue(o, n, -coeff);
-        A.addValue(n, n, coeff);
-        A.addValue(n, o, -coeff);
+        Eqn.addToA(o, o, coeff);
+        Eqn.addToA(o, n, -coeff);
+        Eqn.addToA(n, n, coeff);
+        Eqn.addToA(n, o, -coeff);
     }
 
     // 2. 处理边界
@@ -94,40 +94,38 @@ void FiniteVolume::assembleLaplacian(SpaceMatrix& A, std::vector<double>& b)
             double source = k * area * bc.fraction * bc.refValue / d +
                             k * area * (1.0 - bc.fraction) * bc.refGrad;
 
-            A.addValue(o, o, coeff_p);
-            b[o] += source;
+            Eqn.addToA(o, o, coeff_p);
+            Eqn.addTob(o, source);
         }
     }
 }
 
-void FiniteVolume::assembleSource(SpaceMatrix& A, std::vector<double>& b)
+void FiniteVolume::assembleSource(SpaceMatrix& Eqn)
 {
     for (size_t i = 0; i < mesh.numCells; i++)
     {
-        b[i] += SourceT[i] * mesh.cellVolumes[i];
+        Eqn.addTob(i, SourceT[i] * mesh.cellVolumes[i]);
     }
 }
 
-void FiniteVolume::assembleSpace(SpaceMatrix& A, std::vector<double>& b)
+void FiniteVolume::assembleSpace(SpaceMatrix& Eqn)
 {
     if (Convective)
-        assembleDiv(A, b);
+        assembleDiv(Eqn);
     if (Diffusive)
-        assembleLaplacian(A, b);
+        assembleLaplacian(Eqn);
     if (Source)
-        assembleSource(A, b);
+        assembleSource(Eqn);
 }
 
-void FiniteVolume::assembleTime(SpaceMatrix& A,
-                                std::vector<double>& b,
-                                double dt)
+void FiniteVolume::assembleTime(SpaceMatrix& Eqn, double dt)
 {
-    assembleSpace(A, b);
+    assembleSpace(Eqn);
     for (int i = 0; i < mesh.numCells; ++i)
     {
         double trans = mesh.cellVolumes[i] * rho * Cp / dt;
-        A.addValue(i, i, trans);
-        b[i] += trans * T_old[i];
+        Eqn.addToA(i, i, trans);
+        Eqn.addTob(i, trans * T_old[i]);
     }
 }
 
@@ -189,20 +187,20 @@ void FiniteVolume::solve(TimeScheme ts, Solver& solver, int maxSteps, double dt)
     if (ts == TimeScheme::STEADY)
     {
         writeToTec("out_init.plt");
-        SpaceMatrix A(mesh.numCells);
+        SpaceMatrix TEqn(mesh.numCells);
         std::vector<double> b(mesh.numCells, 0.0);
-        assembleSpace(A, b);
-        T.internalField = solver.solve(A, b, T.internalField);
+        assembleSpace(TEqn);
+        T.internalField = solver.solve(TEqn, T.internalField);
         writeToTec("out_steady.plt", 50.0);
     }
     else if (ts == TimeScheme::IMPLICIT)
     {
         for (int step = 0; step <= maxSteps; ++step)
         {
-            SpaceMatrix A(mesh.numCells);
+            SpaceMatrix TEqn(mesh.numCells);
             std::vector<double> b(mesh.numCells, 0.0);
-            assembleTime(A, b, dt);
-            T.internalField = solver.solve(A, b, T.internalField);
+            assembleTime(TEqn, dt);
+            T.internalField = solver.solve(TEqn, T.internalField);
             T_old.internalField = T.internalField;
             if (step % 5 == 0)
             {

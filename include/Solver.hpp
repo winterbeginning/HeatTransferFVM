@@ -31,23 +31,18 @@ public:
           solverType(solverType){};
 
     std::vector<double> solve(const SpaceMatrix& A,
-                              const std::vector<double>& b,
                               const std::vector<double>& x0 = {});
 
     std::vector<double> jacobi(const SpaceMatrix& A,
-                               const std::vector<double>& b,
                                const std::vector<double>& x0 = {});
 
     std::vector<double> gaussSeidel(const SpaceMatrix& A,
-                                    const std::vector<double>& b,
                                     const std::vector<double>& x0 = {});
 
     std::vector<double> conjugateGradient(const SpaceMatrix& A,
-                                          const std::vector<double>& b,
                                           const std::vector<double>& x0 = {});
 
     std::vector<double> bicgstab(const SpaceMatrix& A,
-                                 const std::vector<double>& b,
                                  const std::vector<double>& x0 = {});
 
 private:

@@ -68,11 +68,11 @@ private:
     std::vector<std::vector<int>> cachedConnectivity;
     void prepareConnectivity();
 
-    void assembleDiv(SpaceMatrix& A, std::vector<double>& b);
-    void assembleLaplacian(SpaceMatrix& A, std::vector<double>& b);
-    void assembleSource(SpaceMatrix& A, std::vector<double>& b);
-    void assembleSpace(SpaceMatrix& A, std::vector<double>& b);
-    void assembleTime(SpaceMatrix& A, std::vector<double>& b, double dt);
+    void assembleDiv(SpaceMatrix& A);
+    void assembleLaplacian(SpaceMatrix& A);
+    void assembleSource(SpaceMatrix& A);
+    void assembleSpace(SpaceMatrix& A);
+    void assembleTime(SpaceMatrix& A, double dt);
 
     void writeField(ofstream& outfile, int nElements, Field<double> field)
     {
