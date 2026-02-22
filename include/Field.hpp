@@ -12,42 +12,47 @@
 template <typename valType>
 class Field
 {
-    struct BoundaryCondition : public BoundaryPatch
+public:
+    // 边界条件定义 (Boundary Condition Definition)
+    struct BoundaryPatchDefinition : public BoundaryPatch
     {
-        valType refValue; // 参考值 (如 T_left)
-        valType refGrad;  // 参考梯度 (如 q/k)
-        double fraction;  // 1.0 = Dirichlet, 0.0 = Neumann
-        BoundaryCondition(const BoundaryPatch& patch) : BoundaryPatch(patch)
+        valType refValue; // 给定的参考值 (Dirichlet)
+        valType refGrad;  // 给定的参考梯度 (Neumann)
+        double fraction;  // 1: Dirichlet, 0: Neumann
+        BoundaryPatchDefinition(const BoundaryPatch& patch)
+            : BoundaryPatch(patch),
+              refValue(valType{}),
+              refGrad(valType{}),
+              fraction(1.0)
         {
         }
     };
 
-public:
     const Mesh& mesh;
 
-    // 内部场 (Internal field): cell-centered values
+    // 内部场 (Internal Field): 单元值
     std::vector<valType> internalField;
-
     std::vector<valType> oldInternalField;
 
-    // 边界场 (Boundary field): 与 Mesh 中的 boundary 一一对应
-    std::vector<BoundaryCondition> boundaryList;
+    // 边界条件参数
+    std::vector<BoundaryPatchDefinition> boundaryList;
 
-    std::vector<vector<valType>> boundaryField;
+    // 缓存的边界面值 (Boundary Face Values): size = nBoundaryFaces
+    // 对应索引从 mesh.nInternalFace 到 mesh.facePoints.size() - 1
+    std::vector<valType> boundaryField;
 
     Field(const Mesh& m, valType initVal = valType{}) : mesh(m)
     {
         internalField.assign(mesh.numCells, initVal);
         oldInternalField = internalField;
 
-        boundaryList.reserve(mesh.boundary.size());
-        boundaryField.reserve(mesh.boundary.size());
+        int nBoundaryFaces = (int)mesh.facePoints.size() - mesh.nInternalFace;
+        boundaryField.assign(nBoundaryFaces, initVal);
 
-        // 遍历网格边界，逐个初始化
+        boundaryList.reserve(mesh.boundary.size());
         for (const auto& patch : mesh.boundary)
         {
             boundaryList.emplace_back(patch);
-            boundaryField.emplace_back(patch.nFaces, initVal);
         }
     }
 
@@ -56,53 +61,65 @@ public:
         std::fill(internalField.begin(), internalField.end(), val);
     };
 
-    // 设置指定边界的条件
+    // 设置边界条件的参数
     void setBoundary(const std::string& patchName,
                      valType refV,
                      valType refG,
                      double frac)
     {
-        for (size_t i = 0; i < mesh.boundary.size(); ++i)
+        for (auto& bc : boundaryList)
         {
-            if (boundaryList[i].name == patchName)
+            if (bc.name == patchName)
             {
-                boundaryList[i].refValue = refV;
-                boundaryList[i].refGrad = refG;
-                boundaryList[i].fraction = frac;
-                boundaryField[i] = getBoundaryValue(i);
+                bc.refValue = refV;
+                bc.refGrad = refG;
+                bc.fraction = frac;
+                correctBoundaryField(); // 更新该边界的值
                 return;
             }
         }
-        throw std::runtime_error("Patch " + patchName + " not found in mesh!");
+        throw std::runtime_error("Patch " + patchName + " not found!");
     }
 
+    // 更新整个内部边界场 (基于当前单元中心值和 BC 参数)
     void correctBoundaryField()
     {
-        for (size_t i = 0; i < boundaryList.size(); ++i)
+        for (const auto& bc : boundaryList)
         {
-            boundaryField[i] = getBoundaryValue(i);
+            for (int i = 0; i < bc.nFaces; ++i)
+            {
+                int globalFaceId = bc.firstFaceIdx + i;
+                int o = mesh.owner[globalFaceId];
+                double dist = mesh.faceCentres[globalFaceId].getDistance(
+                    mesh.cellCentres[o]);
+
+                // 线性外推基础公式: phi_f = f * phi_ref + (1-f) * (phi_cell +
+                // grad_ref * d)
+                valType phi_face = bc.fraction * bc.refValue +
+                                   (1.0 - bc.fraction) *
+                                       (internalField[o] + bc.refGrad * dist);
+
+                boundaryField[globalFaceId - mesh.nInternalFace] = phi_face;
+            }
         }
     }
 
-    vector<valType> getBoundaryValue(int i) const
+    // 获取特定边界 Patch 的 face values (用于插值/输出)
+    std::vector<valType> getPatchValues(int patchIdx) const
     {
-        int nFaces = boundaryList[i].nFaces;
-        vector<valType> tmpValue(nFaces);
-
-        for (int j = 0; j < nFaces; ++j)
+        const auto& bc = boundaryList[patchIdx];
+        std::vector<valType> vals(bc.nFaces);
+        for (int i = 0; i < bc.nFaces; ++i)
         {
-            int globalFaceId = j + boundaryList[i].firstFaceIdx;
-            int o = mesh.owner[globalFaceId];
-            double distance =
-                (mesh.faceCentres[globalFaceId] - mesh.cellCentres[o]).getMag();
-            valType phi_face =
-                boundaryList[i].fraction * boundaryList[i].refValue +
-                (1.0 - boundaryList[i].fraction) *
-                    (this->internalField[o] +
-                     boundaryList[i].refGrad * distance);
-            tmpValue[j] = phi_face;
+            vals[i] = boundaryField[bc.firstFaceIdx + i - mesh.nInternalFace];
         }
-        return tmpValue;
+        return vals;
+    }
+
+    // 获取特定全局面索引的边界值
+    const valType& getBoundaryFaceValue(int globalFaceId) const
+    {
+        return boundaryField[globalFaceId - mesh.nInternalFace];
     }
 
     // 获取特定单元的值 (辅助函数)

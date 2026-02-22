@@ -76,27 +76,60 @@ public:
 
         while (std::getline(file, line))
         {
+            // 去除行首尾的空白字符（空格、制表符、换行符等），避免空行误判
+            line.erase(0, line.find_first_not_of(" \t\n\r"));
+            line.erase(line.find_last_not_of(" \t\n\r") + 1);
+
+            // 检测数据块开始（左括号）
             if (line.find("(") != std::string::npos && !inDataBlock)
             {
                 inDataBlock = true;
-                owner.reserve(std::stoi(old_line));
+                // 预分配空间（使用括号前一行的数字）
+                if (!old_line.empty())
+                {
+                    owner.reserve(std::stoi(old_line));
+                }
                 continue;
             }
+
+            // 检测数据块结束（右括号）
             if (line.find(")") != std::string::npos && inDataBlock)
             {
                 break;
             }
+
+            // 处理数据块内的内容
             if (inDataBlock)
             {
                 if (line.empty())
                     continue;
-                owner.push_back(std::stoi(line));
+
+                std::istringstream iss(line);
+                std::string numStr;
+                while (iss >> numStr)
+                {
+                    try
+                    {
+                        owner.push_back(std::stoi(numStr));
+                    }
+                    catch (const std::invalid_argument& e)
+                    {
+                        std::cerr << "警告: 无效的数字格式: " << numStr
+                                  << "，已跳过" << std::endl;
+                    }
+                    catch (const std::out_of_range& e)
+                    {
+                        std::cerr << "警告: 数字超出范围: " << numStr
+                                  << "，已跳过" << std::endl;
+                    }
+                }
             }
             else
             {
                 old_line = line;
             }
         }
+
         file.close();
     };
 
@@ -117,21 +150,50 @@ public:
 
         while (std::getline(file, line))
         {
+            // 去除行首尾的空白字符（空格、制表符、换行符等），避免空行误判
+            line.erase(0, line.find_first_not_of(" \t\n\r"));
+            line.erase(line.find_last_not_of(" \t\n\r") + 1);
+
             if (line.find("(") != std::string::npos && !inDataBlock)
             {
                 inDataBlock = true;
-                neighbour.reserve(std::stoi(old_line));
+                // 预分配空间（使用括号前一行的数字）
+                if (!old_line.empty())
+                {
+                    owner.reserve(std::stoi(old_line));
+                }
                 continue;
             }
+
             if (line.find(")") != std::string::npos && inDataBlock)
             {
                 break;
             }
+
             if (inDataBlock)
             {
                 if (line.empty())
                     continue;
-                neighbour.push_back(std::stoi(line));
+
+                std::istringstream iss(line);
+                std::string numStr;
+                while (iss >> numStr)
+                {
+                    try
+                    {
+                        neighbour.push_back(std::stoi(numStr));
+                    }
+                    catch (const std::invalid_argument& e)
+                    {
+                        std::cerr << "警告: 无效的数字格式: " << numStr
+                                  << "，已跳过" << std::endl;
+                    }
+                    catch (const std::out_of_range& e)
+                    {
+                        std::cerr << "警告: 数字超出范围: " << numStr
+                                  << "，已跳过" << std::endl;
+                    }
+                }
             }
             else
             {
@@ -334,6 +396,7 @@ public:
     };
 
     // 通用的几何属性计算函数，支持二维(Z=0)和三维网格
+    // 改进版：使用迭代优化方法计算单元中心，提高对复杂网格的鲁棒性
     void calculateGeometry()
     {
         numCells = 0;
@@ -343,8 +406,7 @@ public:
             if (n != -1)
                 numCells = std::max(numCells, n + 1);
 
-        // 1.
-        // 自动判断维度：检查网格是否本质上是二维的（所有面是否只有2个点，或者Z坐标是否全为0）
+        // 1. 自动判断维度
         bool is2D = true;
         for (const auto& fp : facePoints)
         {
@@ -356,7 +418,6 @@ public:
         }
         if (is2D)
         {
-            // 进一步检查所有点的 Z 坐标是否有变化
             for (const auto& p : points)
             {
                 if (std::abs(p.z) > 1e-12)
@@ -372,10 +433,12 @@ public:
         faceAreas.assign(nFaces, 0.0);
         faceNormals.assign(nFaces, Vector(0, 0, 0));
 
-        // 2. 计算面属性
+        // 2. 计算面属性（面中心、面积、法向量）
         for (int i = 0; i < nFaces; ++i)
         {
             const auto& verts = facePoints[i];
+
+            // 面中心：顶点平均
             Vector center(0, 0, 0);
             for (int vid : verts)
                 center = center + points[vid];
@@ -383,18 +446,16 @@ public:
 
             if (is2D && verts.size() == 2)
             {
-                // 二维逻辑：面是线段
+                // 二维：面是线段
                 Vector p1 = points[verts[0]];
                 Vector p2 = points[verts[1]];
                 Vector dP = p2 - p1;
                 faceAreas[i] = dP.getMag();
-                // 默认法向：在XY平面内旋转90度 (dy, -dx, 0)
                 faceNormals[i] = Vector(dP.y, -dP.x, 0.0);
             }
             else
             {
-                // 三维逻辑：面是多边形
-                // 使用三角形扇形法计算矢量面积 (Vector Area)
+                // 三维：多边形面，使用扇形三角化计算矢量面积
                 Vector vectorArea(0, 0, 0);
                 for (size_t v = 0; v < verts.size(); ++v)
                 {
@@ -408,52 +469,159 @@ public:
                 faceNormals[i] = vectorArea / (faceAreas[i] + 1e-20);
             }
 
+            // 归一化法向量
             if (faceNormals[i].getMag() > 1e-15)
                 faceNormals[i] = faceNormals[i] / faceNormals[i].getMag();
         }
 
+        // 3. 建立单元-面关系表（用于迭代优化单元中心）
         cellCentres.assign(numCells, Vector(0, 0, 0));
         cellVolumes.assign(numCells, 0.0);
-        std::vector<int> faceCount(numCells, 0);
+        std::vector<std::vector<int>> cellFaces(numCells);
 
-        // 3. 初步计算单元中心（面的平均中心）
         for (int i = 0; i < nFaces; ++i)
         {
-            cellCentres[owner[i]] = cellCentres[owner[i]] + faceCentres[i];
-            faceCount[owner[i]]++;
+            cellFaces[owner[i]].push_back(i);
         }
         for (size_t i = 0; i < neighbour.size(); ++i)
         {
-            cellCentres[neighbour[i]] =
-                cellCentres[neighbour[i]] + faceCentres[i];
-            faceCount[neighbour[i]]++;
-        }
-        for (int i = 0; i < numCells; ++i)
-        {
-            if (faceCount[i] > 0)
-                cellCentres[i] = cellCentres[i] / (double)faceCount[i];
+            cellFaces[neighbour[i]].push_back(i);
         }
 
-        // 4. 修正法向量方向并计算单元体积/面积
-        // 使用散度定理: V = 1/d * sum( (Rf - Rc) . n * Af )
+        // 4. 初始估计：面中心平均
+        for (int cellId = 0; cellId < numCells; ++cellId)
+        {
+            Vector sum(0, 0, 0);
+            for (int faceId : cellFaces[cellId])
+            {
+                sum = sum + faceCentres[faceId];
+            }
+            if (cellFaces[cellId].size() > 0)
+                cellCentres[cellId] = sum / (double)cellFaces[cellId].size();
+        }
+
+        // 5. 迭代优化单元中心：使用体积加权的金字塔中心（3次迭代）
+        for (int iter = 0; iter < 3; ++iter)
+        {
+            for (int cellId = 0; cellId < numCells; ++cellId)
+            {
+                Vector volWeightedCenter(0, 0, 0);
+                double totalVol = 0.0;
+
+                for (int faceId : cellFaces[cellId])
+                {
+                    const auto& verts = facePoints[faceId];
+
+                    if (is2D && verts.size() == 2)
+                    {
+                        // 2D：计算三角形（单元中心+两个顶点）
+                        Vector p1 = points[verts[0]];
+                        Vector p2 = points[verts[1]];
+                        Vector triCenter =
+                            (cellCentres[cellId] + p1 + p2) / 3.0;
+
+                        // 三角形面积 = 0.5 * |叉积的Z分量|
+                        double triArea =
+                            0.5 *
+                            std::abs((p2 - p1)
+                                         .crossWith(cellCentres[cellId] - p1)
+                                         .z);
+
+                        volWeightedCenter =
+                            volWeightedCenter + triCenter * triArea;
+                        totalVol += triArea;
+                    }
+                    else
+                    {
+                        // 3D：将面分解为三角形，每个三角形与单元中心组成四面体
+                        for (size_t v = 0; v < verts.size(); ++v)
+                        {
+                            Vector p1 = points[verts[v]];
+                            Vector p2 = points[verts[(v + 1) % verts.size()]];
+                            Vector p3 = faceCentres[faceId];
+
+                            // 四面体中心 = (顶点0 + 顶点1 + 顶点2 + 顶点3) / 4
+                            Vector tetCenter =
+                                (cellCentres[cellId] + p1 + p2 + p3) * 0.25;
+
+                            // 四面体体积 = |det(v1, v2, v3)| / 6
+                            Vector v1 = p1 - cellCentres[cellId];
+                            Vector v2 = p2 - cellCentres[cellId];
+                            Vector v3 = p3 - cellCentres[cellId];
+                            double tetVol =
+                                std::abs(v1 * v2.crossWith(v3)) / 6.0;
+
+                            volWeightedCenter =
+                                volWeightedCenter + tetCenter * tetVol;
+                            totalVol += tetVol;
+                        }
+                    }
+                }
+
+                if (totalVol > 1e-20)
+                    cellCentres[cellId] = volWeightedCenter / totalVol;
+            }
+        }
+
+        // 6. 修正面法向量方向（确保从owner指向neighbour）
+        for (int i = 0; i < nFaces; ++i)
+        {
+            Vector dC = faceCentres[i] - cellCentres[owner[i]];
+            if (dC * faceNormals[i] < 0)
+                faceNormals[i] = faceNormals[i] * -1.0;
+        }
+
+        // 7. 计算单元体积：使用散度定理
         double dimInv = is2D ? 0.5 : (1.0 / 3.0);
+        cellVolumes.assign(numCells, 0.0);
 
         for (int i = 0; i < nFaces; ++i)
         {
-            // 确保法向量从 owner 指向 neighbour
-            Vector dC = faceCentres[i] - cellCentres[owner[i]];
-            if (dC.dotWith(faceNormals[i]) < 0)
-                faceNormals[i] = faceNormals[i] * -1.0;
-
-            // 累加对 owner 的体积贡献
-            double dot_o = (faceCentres[i] - cellCentres[owner[i]])
-                               .dotWith(faceNormals[i]);
+            // Owner单元的体积贡献
+            double dot_o =
+                (faceCentres[i] - cellCentres[owner[i]]) * faceNormals[i];
             cellVolumes[owner[i]] += dimInv * dot_o * faceAreas[i];
+
+            // Neighbour单元的体积贡献（法向量反向）
             if (i < neighbour.size())
             {
-                double dot_n = (faceCentres[i] - cellCentres[neighbour[i]])
-                                   .dotWith(faceNormals[i] * -1.0);
+                double dot_n = (faceCentres[i] - cellCentres[neighbour[i]]) *
+                               faceNormals[i] * -1.0;
                 cellVolumes[neighbour[i]] += dimInv * dot_n * faceAreas[i];
+            }
+        }
+
+        // 8. 几何验证：检查异常情况
+        int negVolCount = 0;
+        for (int i = 0; i < numCells; ++i)
+        {
+            if (cellVolumes[i] < 0)
+            {
+                cellVolumes[i] = std::abs(cellVolumes[i]);
+                negVolCount++;
+            }
+            if (cellVolumes[i] < 1e-20)
+            {
+                std::cerr << "警告: 单元 " << i
+                          << " 体积过小: " << cellVolumes[i] << std::endl;
+            }
+        }
+
+        if (negVolCount > 0)
+        {
+            std::cerr << "警告: 检测到 " << negVolCount
+                      << " 个负体积单元（已修正为绝对值）" << std::endl;
+            std::cerr << "       可能原因：网格质量差、法向量方向错误或强烈扭曲"
+                      << std::endl;
+        }
+
+        // 验证面积
+        for (int i = 0; i < nFaces; ++i)
+        {
+            if (faceAreas[i] < 1e-20)
+            {
+                std::cerr << "警告: 面 " << i << " 面积过小: " << faceAreas[i]
+                          << std::endl;
             }
         }
     }

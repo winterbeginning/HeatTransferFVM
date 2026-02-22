@@ -21,7 +21,7 @@ public:
         return sqrt(sqr(x) + sqr(y) + sqr(z));
     }
 
-    double getDistance(const Point3D& v)
+    double getDistance(const Point3D& v) const
     {
         return sqrt(sqr(x - v.x) + sqr(y - v.y) + sqr(z - v.z));
     };
@@ -51,6 +51,11 @@ public:
     Point3D operator*(const double a) const
     {
         return Point3D(a * x, a * y, a * z);
+    }
+
+    double operator*(const Point3D& rhs) const
+    {
+        return (x * rhs.x + y * rhs.y + z * rhs.z);
     }
 
     Point3D operator/(const double a) const
