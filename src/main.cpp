@@ -13,8 +13,8 @@ int main()
 
     FiniteVolume fvm(mesh);
 
-    fvm.setSolveOption(true, false, false);
-    fvm.setProperties(1.0, 1.0, 1.0, 0.001);
+    fvm.setSolveOption(true, true, true);
+    fvm.properties.setProperties(1.0, 1.0, 1.0, 0.001);
 
     Field<double>& T = fvm.T;
     Field<double>& SourceT = fvm.SourceT;
@@ -35,11 +35,11 @@ int main()
     U.setBoundary("right", Vector(1.0, 1.0, 0), Vector(), 0.0);
     U.setBoundary("top", Vector(1.0, 1.0, 0), Vector(), 0.0);
 
-    Solver solver(1000, 1e-6, true, SolverType::GAUSS_SEIDEL);
+    Solver solver(5000, 1e-6, true, SolverType::GAUSS_SEIDEL);
 
-    // fvm.solve(TimeScheme::STEADY, solver);
+    fvm.solve(TimeScheme::STEADY, solver);
 
-    fvm.solve(TimeScheme::IMPLICIT, solver, 10, 0.2);
+    // fvm.solve(TimeScheme::IMPLICIT, solver, 10, 0.2);
 
     return 0;
 }

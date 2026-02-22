@@ -1,132 +1,28 @@
 #include "FiniteVolume.hpp"
+#include "FVMDiscrete.hpp"
 #include <fstream>
 #include <iostream>
 #include <algorithm>
 #include <cmath>
 
-void FiniteVolume::assembleDiv(SpaceMatrix& Eqn)
-{
-    for (int i = 0; i < mesh.nInternalFace; ++i)
-    {
-        int o = mesh.owner[i];
-        int n = mesh.neighbour[i];
-        double area = mesh.faceAreas[i];
-        Vector areaDirect = mesh.faceNormals[i];
-        Vector U_face = (U[o] + U[n]) / 2.0;
-
-        double flux = rho * U_face.dotWith(areaDirect) * area;
-
-        if (flux > 0) // 流动方向 o --> n   面变量等于o单元
-        {
-            Eqn.addToA(o, o, flux); // o单元方程，面变量来自o，流出为正
-            Eqn.addToA(n, o, -flux); // n单元方程，面变量来自o，流入为负
-        }
-        else // 流动方向 n --> o   面变量等于n单元
-        {
-            Eqn.addToA(o, n, flux); // o单元方程，面变量来自n，流入为正
-            Eqn.addToA(n, n, -flux); // n单元方程，面变量来自n，流出为负
-        };
-    }
-
-    for (int pIdx = 0; pIdx < mesh.boundary.size(); ++pIdx)
-    {
-        const auto& patch = mesh.boundary[pIdx];
-        const auto& Ubc = U.boundaryField[pIdx];
-        const auto& phi_bc = T.boundaryField[pIdx];
-        for (int i = patch.firstFaceIdx; i < patch.firstFaceIdx + patch.nFaces;
-             ++i)
-        {
-            int o = mesh.owner[i];
-            double area = mesh.faceAreas[i];
-            Vector areaDirect = mesh.faceNormals[i];
-            double d = (mesh.faceCentres[i] - mesh.cellCentres[o]).getMag();
-            Vector U_face = Ubc.fraction * Ubc.refValue +
-                            (1.0 - Ubc.fraction) * (U[o] + Ubc.refGrad * d);
-
-            double phi_face =
-                phi_bc.fraction * phi_bc.refValue +
-                (1.0 - phi_bc.fraction) * (T[o] + phi_bc.refGrad * d);
-
-            double flux = rho * U_face.dotWith(areaDirect) * area;
-
-            if (flux > 0) // 流出
-            {
-                Eqn.addToA(o, o, flux);
-            }
-            else // 流入
-            {
-                Eqn.addTob(o, -flux * phi_face);
-            };
-        }
-    }
-}
-
-void FiniteVolume::assembleLaplacian(SpaceMatrix& Eqn)
-{
-    // 1. 处理内部面
-    for (int i = 0; i < mesh.nInternalFace; ++i)
-    {
-        int o = mesh.owner[i];
-        int n = mesh.neighbour[i];
-        double area = mesh.faceAreas[i];
-        double dist = (mesh.cellCentres[n] - mesh.cellCentres[o]).getMag();
-        double coeff = k * area / dist;
-
-        Eqn.addToA(o, o, coeff);
-        Eqn.addToA(o, n, -coeff);
-        Eqn.addToA(n, n, coeff);
-        Eqn.addToA(n, o, -coeff);
-    }
-
-    // 2. 处理边界
-    for (int pIdx = 0; pIdx < mesh.boundary.size(); ++pIdx)
-    {
-        const auto& patch = mesh.boundary[pIdx];
-        const auto& bc = T.boundaryField[pIdx];
-        for (int i = patch.firstFaceIdx; i < patch.firstFaceIdx + patch.nFaces;
-             ++i)
-        {
-            int o = mesh.owner[i];
-            double area = mesh.faceAreas[i];
-            double d = (mesh.faceCentres[i] - mesh.cellCentres[o]).getMag();
-
-            double coeff_p = k * area * bc.fraction / d;
-            double source = k * area * bc.fraction * bc.refValue / d +
-                            k * area * (1.0 - bc.fraction) * bc.refGrad;
-
-            Eqn.addToA(o, o, coeff_p);
-            Eqn.addTob(o, source);
-        }
-    }
-}
-
 void FiniteVolume::assembleSource(SpaceMatrix& Eqn)
 {
-    for (size_t i = 0; i < mesh.numCells; i++)
+    for (size_t i = 0; i < mesh.numCells; ++i)
     {
         Eqn.addTob(i, SourceT[i] * mesh.cellVolumes[i]);
     }
 }
 
-void FiniteVolume::assembleSpace(SpaceMatrix& Eqn)
+void FiniteVolume::assembleMatrix(SpaceMatrix& Eqn, TimeScheme st, double dt)
 {
     if (Convective)
-        assembleDiv(Eqn);
+        fvm::Div(Eqn, properties, U, T);
     if (Diffusive)
-        assembleLaplacian(Eqn);
+        fvm::Laplacian(Eqn, properties, T);
     if (Source)
         assembleSource(Eqn);
-}
-
-void FiniteVolume::assembleTime(SpaceMatrix& Eqn, double dt)
-{
-    assembleSpace(Eqn);
-    for (int i = 0; i < mesh.numCells; ++i)
-    {
-        double trans = mesh.cellVolumes[i] * rho * Cp / dt;
-        Eqn.addToA(i, i, trans);
-        Eqn.addTob(i, trans * T_old[i]);
-    }
+    if (st == TimeScheme::IMPLICIT)
+        fvm::Ddt(Eqn, properties, T, dt);
 }
 
 void FiniteVolume::prepareConnectivity()
@@ -187,21 +83,22 @@ void FiniteVolume::solve(TimeScheme ts, Solver& solver, int maxSteps, double dt)
     if (ts == TimeScheme::STEADY)
     {
         writeToTec("out_init.plt");
-        SpaceMatrix TEqn(mesh.numCells);
-        std::vector<double> b(mesh.numCells, 0.0);
-        assembleSpace(TEqn);
+        TEqn.clear();
+        assembleMatrix(TEqn, ts);
         T.internalField = solver.solve(TEqn, T.internalField);
+        T.correctBoundaryField();
+        T.storeOldField();
         writeToTec("out_steady.plt", 50.0);
     }
     else if (ts == TimeScheme::IMPLICIT)
     {
         for (int step = 0; step <= maxSteps; ++step)
         {
-            SpaceMatrix TEqn(mesh.numCells);
-            std::vector<double> b(mesh.numCells, 0.0);
-            assembleTime(TEqn, dt);
+            TEqn.clear();
+            assembleMatrix(TEqn, ts, dt);
             T.internalField = solver.solve(TEqn, T.internalField);
-            T_old.internalField = T.internalField;
+            T.correctBoundaryField();
+            T.storeOldField();
             if (step % 5 == 0)
             {
                 std::cout << "Time step " << step << " done." << std::endl;

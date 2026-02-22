@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _Mesh_
+#define _Mesh_
 
 #include <vector>
 #include <string>
@@ -12,9 +13,16 @@
 struct BoundaryPatch
 {
     std::string name;
-    std::vector<int> faceIndices;
     int firstFaceIdx;
     int nFaces;
+
+    BoundaryPatch(const std::string& n, int first, int num)
+        : name(n), firstFaceIdx(first), nFaces(num)
+    {
+    }
+    BoundaryPatch() : firstFaceIdx(0), nFaces(0)
+    {
+    }
 };
 
 class Mesh
@@ -504,10 +512,7 @@ public:
                             std::vector<std::vector<int>> fP,
                             std::vector<int> own)
         {
-            BoundaryPatch patch;
-            patch.name = name;
-            patch.firstFaceIdx = facePoints.size();
-            patch.nFaces = fP.size();
+            BoundaryPatch patch(name, facePoints.size(), fP.size());
             for (int i = 0; i < fP.size(); ++i)
             {
                 facePoints.push_back(fP[i]);
@@ -560,3 +565,5 @@ public:
         calculateGeometry();
     }
 };
+
+#endif

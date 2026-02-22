@@ -1,54 +1,32 @@
-#pragma once
+#ifndef _SpaceMatrix_
+#define _SpaceMatrix_
 
 #include <vector>
 #include <map>
 
 class SpaceMatrix
 {
-private:
+public:
     int n;
-    // 使用 std::vector<std::map<int, double>> 进行装配，兼顾稀疏性和查找效率
-    // 在装配阶段，map 可以自动处理索引排序和重复项加和
-    std::vector<std::map<int, double>> A;
-
+    // 每次组装用的临时存储，结束后会被压缩为 CSR 格式
+    std::vector<std::map<int, double>> assembly_A;
     std::vector<double> b;
 
-public:
-    SpaceMatrix(int n) : n(n), A(n), b(n, 0.0)
+    // CSR 数据结构
+    std::vector<double> csr_val;
+    std::vector<int> csr_col;
+    std::vector<int> csr_ptr;
+
+    SpaceMatrix(int n) : n(n), assembly_A(n), b(n, 0.0)
     {
     }
 
-    // 设置/增加值
+    // 核心组装接口
     void addToA(int i, int j, double val)
     {
         if (i < 0 || i >= n || j < 0 || j >= n)
             return;
-        A[i][j] += val;
-    }
-
-    void setA(int i, int j, double val)
-    {
-        if (i < 0 || i >= n || j < 0 || j >= n)
-            return;
-        A[i][j] = val;
-    }
-
-    double getA(int i, int j) const
-    {
-        auto it = A[i].find(j);
-        if (it != A[i].end())
-            return it->second;
-        return 0.0;
-    }
-
-    std::map<int, double> getA(int i) const
-    {
-        return A.at(i);
-    }
-
-    std::vector<std::map<int, double>>& getA()
-    {
-        return A;
+        assembly_A[i][j] += val;
     }
 
     void addTob(int i, double val)
@@ -58,61 +36,67 @@ public:
         b[i] += val;
     }
 
-    void setb(int i, double val)
+    // 将 map 形式压缩为 CSR 形式
+    void compress()
     {
-        if (i < 0 || i >= n)
-            return;
-        b[i] = val;
+        csr_val.clear();
+        csr_col.clear();
+        csr_ptr.assign(n + 1, 0);
+
+        int current_nnz = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            csr_ptr[i] = current_nnz;
+            for (auto const& [j, val] : assembly_A[i])
+            {
+                csr_val.push_back(val);
+                csr_col.push_back(j);
+                current_nnz++;
+            }
+        }
+        csr_ptr[n] = current_nnz;
     }
 
-    double getb(int i) const
+    // 清理数据，但不改变 n
+    void clear()
     {
-        if (i < 0 || i >= n)
-            return 0;
-        return b.at(i);
+        for (auto& row : assembly_A)
+            row.clear();
+        std::fill(b.begin(), b.end(), 0.0);
+        csr_val.clear();
+        csr_col.clear();
+        csr_ptr.clear();
     }
 
-    std::vector<double>& getb()
-    {
-        return b;
-    }
-
-    std::vector<double> getb() const
-    {
-        return b;
-    }
-
-    // 矩阵-向量乘法
+    // CSR 矩阵-向量乘法
     std::vector<double> multiply(const std::vector<double>& x) const
     {
         std::vector<double> res(n, 0.0);
         for (int i = 0; i < n; ++i)
         {
-            for (auto const& [j, val] : A[i])
+            for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
             {
-                res[i] += val * x[j];
+                res[i] += csr_val[k] * x[csr_col[k]];
             }
         }
         return res;
     }
 
-    // 获取对角线元素
+    // 获取对角线元素（基于 CSR 查找）
     double diag(int i) const
     {
-        auto it = A[i].find(i);
-        if (it != A[i].end())
-            return it->second;
+        for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
+        {
+            if (csr_col[k] == i)
+                return csr_val[k];
+        }
         return 0.0;
     }
 
-    void clear()
-    {
-        for (auto& row : A)
-            row.clear();
-    }
-
-    size_t size() const
+    int size() const
     {
         return n;
     }
 };
+
+#endif

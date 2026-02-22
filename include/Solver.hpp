@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _Solver_
+#define _Solver_
 
 #include <vector>
 #include <cmath>
@@ -30,22 +31,24 @@ public:
           verbose(verbose),
           solverType(solverType){};
 
-    std::vector<double> solve(const SpaceMatrix& A,
+    std::vector<double> solve(SpaceMatrix& Eqn,
                               const std::vector<double>& x0 = {});
 
-    std::vector<double> jacobi(const SpaceMatrix& A,
+    std::vector<double> jacobi(const SpaceMatrix& Eqn,
                                const std::vector<double>& x0 = {});
 
-    std::vector<double> gaussSeidel(const SpaceMatrix& A,
+    std::vector<double> gaussSeidel(const SpaceMatrix& Eqn,
                                     const std::vector<double>& x0 = {});
 
-    std::vector<double> conjugateGradient(const SpaceMatrix& A,
+    std::vector<double> conjugateGradient(const SpaceMatrix& Eqn,
                                           const std::vector<double>& x0 = {});
 
-    std::vector<double> bicgstab(const SpaceMatrix& A,
+    std::vector<double> bicgstab(const SpaceMatrix& Eqn,
                                  const std::vector<double>& x0 = {});
 
 private:
     double dot(const std::vector<double>& v1, const std::vector<double>& v2);
     double norm(const std::vector<double>& v);
 };
+
+#endif

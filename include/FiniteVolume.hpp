@@ -1,9 +1,11 @@
-#pragma once
+#ifndef _FiniteVolume_
+#define _FiniteVolume_
 
 #include "Mesh.hpp"
 #include "Solver.hpp"
 #include "Field.hpp"
 #include "Point3D.hpp"
+#include "Properties.hpp"
 
 enum class TimeScheme
 {
@@ -15,10 +17,7 @@ class FiniteVolume
 {
 public:
     const Mesh& mesh;
-    double k; // Thermal conductivity
-    double rho;
-    double Cp;
-    double mu;
+    Properties properties;
     bool Convective;
     bool Diffusive;
     bool Source;
@@ -28,19 +27,20 @@ public:
     Field<double> SourceT;
     Field<Vector> U;
 
+    // 对矩阵实例进行复用，避免每一时间步或迭代都重新申请内存
+    SpaceMatrix TEqn;
+
     FiniteVolume(const Mesh& mesh)
         : mesh(mesh),
-          k(1.0),
-          rho(1.0),
-          Cp(1.0),
-          mu(1.0),
+          properties(1.0, 1.0, 1.0, 1.0),
           Convective(false),
           Diffusive(true),
           Source(true),
-          T("T", mesh),
-          T_old("Told", mesh),
-          SourceT("sourceT", mesh, 0.0),
-          U("U", mesh, Vector(1.0, 1.0, 0))
+          T(mesh),
+          T_old(mesh),
+          SourceT(mesh, 0.0),
+          U(mesh, Vector(1.0, 1.0, 0)),
+          TEqn(mesh.numCells)
     {
     }
 
@@ -56,23 +56,12 @@ public:
         this->Source = Source;
     }
 
-    void setProperties(double k, double rho, double Cp, double mu)
-    {
-        this->k = k;
-        this->rho = rho;
-        this->Cp = Cp;
-        this->mu = mu;
-    }
-
 private:
     std::vector<std::vector<int>> cachedConnectivity;
     void prepareConnectivity();
 
-    void assembleDiv(SpaceMatrix& A);
-    void assembleLaplacian(SpaceMatrix& A);
     void assembleSource(SpaceMatrix& A);
-    void assembleSpace(SpaceMatrix& A);
-    void assembleTime(SpaceMatrix& A, double dt);
+    void assembleMatrix(SpaceMatrix& A, TimeScheme ts, double dt = 1.0);
 
     void writeField(ofstream& outfile, int nElements, Field<double> field)
     {
@@ -94,3 +83,5 @@ private:
         outfile << "\n";
     };
 };
+
+#endif

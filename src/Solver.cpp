@@ -1,9 +1,10 @@
 #include "Solver.hpp"
 #include <iostream>
 
-std::vector<double> Solver::solve(const SpaceMatrix& Eqn,
+std::vector<double> Solver::solve(SpaceMatrix& Eqn,
                                   const std::vector<double>& x0)
 {
+    Eqn.compress(); // 求解前将组装好的 A 压缩为 CSR
     switch (solverType)
     {
     case SolverType::JACOBI:
@@ -36,25 +37,27 @@ std::vector<double> Solver::jacobi(const SpaceMatrix& Eqn,
                                    const std::vector<double>& x0)
 {
     std::vector<double> x =
-        (x0.size() == Eqn.size()) ? x0 : std::vector<double>(Eqn.size(), 0.0);
-    std::vector<double> x_new(Eqn.size(), 0.0);
+        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
+    std::vector<double> x_new(Eqn.n, 0.0);
     for (int iter = 0; iter < maxIter; ++iter)
     {
-        for (int i = 0; i < Eqn.size(); ++i)
+        for (int i = 0; i < Eqn.n; ++i)
         {
-            double diag = Eqn.diag(i);
+            double diag = 0.0;
             double sum = 0.0;
-            for (const auto& [j, val] : Eqn.getA(i))
+            for (int k = Eqn.csr_ptr[i]; k < Eqn.csr_ptr[i + 1]; ++k)
             {
-                if (j != i)
-                    sum += val * x[j];
+                if (Eqn.csr_col[k] == i)
+                    diag = Eqn.csr_val[k];
+                else
+                    sum += Eqn.csr_val[k] * x[Eqn.csr_col[k]];
             }
-            x_new[i] = (Eqn.getb(i) - sum) / diag;
+            x_new[i] = (Eqn.b[i] - sum) / diag;
         }
         x = x_new;
         std::vector<double> r = Eqn.multiply(x);
-        for (int i = 0; i < Eqn.size(); ++i)
-            r[i] -= Eqn.getb(i);
+        for (int i = 0; i < Eqn.n; ++i)
+            r[i] -= Eqn.b[i];
         double res = norm(r);
         if (verbose && iter % 100 == 0)
             std::cout << "[Jacobi] Iter " << iter << ", Residual: " << res
@@ -74,23 +77,25 @@ std::vector<double> Solver::gaussSeidel(const SpaceMatrix& Eqn,
                                         const std::vector<double>& x0)
 {
     std::vector<double> x =
-        (x0.size() == Eqn.size()) ? x0 : std::vector<double>(Eqn.size(), 0.0);
+        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
     for (int iter = 0; iter < maxIter; ++iter)
     {
-        for (int i = 0; i < Eqn.size(); ++i)
+        for (int i = 0; i < Eqn.n; ++i)
         {
-            double diag = Eqn.diag(i);
+            double diag = 0.0;
             double sum = 0.0;
-            for (const auto& [j, val] : Eqn.getA(i))
+            for (int k = Eqn.csr_ptr[i]; k < Eqn.csr_ptr[i + 1]; ++k)
             {
-                if (j != i)
-                    sum += val * x[j];
+                if (Eqn.csr_col[k] == i)
+                    diag = Eqn.csr_val[k];
+                else
+                    sum += Eqn.csr_val[k] * x[Eqn.csr_col[k]];
             }
-            x[i] = (Eqn.getb(i) - sum) / diag;
+            x[i] = (Eqn.b[i] - sum) / diag;
         }
         std::vector<double> r = Eqn.multiply(x);
-        for (int i = 0; i < Eqn.size(); ++i)
-            r[i] -= Eqn.getb(i);
+        for (int i = 0; i < Eqn.n; ++i)
+            r[i] -= Eqn.b[i];
         double res = norm(r);
         if (verbose && iter % 100 == 0)
             std::cout << "[Gauss-Seidel] Iter " << iter << ", Residual: " << res
@@ -110,10 +115,10 @@ std::vector<double> Solver::conjugateGradient(const SpaceMatrix& Eqn,
                                               const std::vector<double>& x0)
 {
     std::vector<double> x =
-        (x0.size() == Eqn.size()) ? x0 : std::vector<double>(Eqn.size(), 0.0);
-    std::vector<double> r = Eqn.getb();
+        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
+    std::vector<double> r = Eqn.b;
     std::vector<double> Ax = Eqn.multiply(x);
-    for (int i = 0; i < Eqn.size(); ++i)
+    for (int i = 0; i < Eqn.n; ++i)
         r[i] -= Ax[i];
     std::vector<double> p = r;
     double rsold = dot(r, r);
@@ -126,7 +131,7 @@ std::vector<double> Solver::conjugateGradient(const SpaceMatrix& Eqn,
             break;
 
         double alpha = rsold / check_denom;
-        for (int i = 0; i < Eqn.size(); ++i)
+        for (int i = 0; i < Eqn.n; ++i)
         {
             x[i] += alpha * p[i];
             r[i] -= alpha * Ap[i];
@@ -143,7 +148,7 @@ std::vector<double> Solver::conjugateGradient(const SpaceMatrix& Eqn,
                           << " iterations, Final Res: " << res << std::endl;
             return x;
         }
-        for (int i = 0; i < Eqn.size(); ++i)
+        for (int i = 0; i < Eqn.n; ++i)
         {
             p[i] = r[i] + (rsnew / rsold) * p[i];
         }
@@ -156,16 +161,16 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& Eqn,
                                      const std::vector<double>& x0)
 {
     std::vector<double> x =
-        (x0.size() == Eqn.size()) ? x0 : std::vector<double>(Eqn.size(), 0.0);
-    std::vector<double> r = Eqn.getb();
+        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
+    std::vector<double> r = Eqn.b;
     std::vector<double> Ax = Eqn.multiply(x);
-    for (int i = 0; i < Eqn.size(); ++i)
+    for (int i = 0; i < Eqn.n; ++i)
         r[i] -= Ax[i];
     std::vector<double> r_star = r;
     std::vector<double> p = r;
 
     double rho = 1.0, alpha = 1.0, omega = 1.0;
-    std::vector<double> v(Eqn.size(), 0.0), s(Eqn.size(), 0.0);
+    std::vector<double> v(Eqn.n, 0.0), s(Eqn.n, 0.0);
 
     for (int iter = 0; iter < maxIter; ++iter)
     {
@@ -177,7 +182,7 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& Eqn,
         if (iter > 0)
         {
             double beta = (rho / rho_prev) * (alpha / omega);
-            for (int i = 0; i < Eqn.size(); ++i)
+            for (int i = 0; i < Eqn.n; ++i)
             {
                 p[i] = r[i] + beta * (p[i] - omega * v[i]);
             }
@@ -189,13 +194,13 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& Eqn,
             break;
 
         alpha = rho / denom;
-        for (int i = 0; i < Eqn.size(); ++i)
+        for (int i = 0; i < Eqn.n; ++i)
             s[i] = r[i] - alpha * v[i];
 
         double res_s = norm(s);
         if (res_s < tol)
         {
-            for (int i = 0; i < Eqn.size(); ++i)
+            for (int i = 0; i < Eqn.n; ++i)
                 x[i] += alpha * p[i];
             if (verbose)
                 std::cout << "[BiCGSTAB] (early) converged in " << iter
@@ -209,7 +214,7 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& Eqn,
             break;
 
         omega = dot(t, s) / t_norm_sq;
-        for (int i = 0; i < Eqn.size(); ++i)
+        for (int i = 0; i < Eqn.n; ++i)
         {
             x[i] += alpha * p[i] + omega * s[i];
             r[i] = s[i] - omega * t[i];
