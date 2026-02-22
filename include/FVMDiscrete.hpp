@@ -171,9 +171,9 @@ inline void Laplacian(SpaceMatrix& phiEqn,
         // === 正交部分（隐式处理，进入系数矩阵）===
         // 修正后的正交系数：deltaCoeff = |Sf|² / (Sf · d)
         double SfdotD = Sf * d;
-        double deltaCoeff =
-            properties.kappa() * magSf * magSf / (SfdotD + 1e-30);
-        // double deltaCoeff = properties.kappa() * magSf / d.getMag();
+        // double deltaCoeff =
+        //     properties.kappa() * magSf * magSf / (SfdotD + 1e-30);
+        double deltaCoeff = properties.kappa() * magSf / d.getMag();
 
         // 添加到系数矩阵（隐式）
         phiEqn.addToA(o, o, deltaCoeff);
@@ -184,15 +184,15 @@ inline void Laplacian(SpaceMatrix& phiEqn,
         // === 非正交修正（显式处理，作为源项）===
         // 计算非正交向量：T = Sf - Δ
         // 其中 Δ = (|Sf|² / (Sf · d)) * d
-        Vector Delta = d * (magSf * magSf / (SfdotD + 1e-30));
-        Vector T = Sf - Delta;
+        // Vector Delta = d * (magSf * magSf / (SfdotD + 1e-30));
+        // Vector T = Sf - Delta;
 
-        // 非正交修正项：κ * (∇φ)_f · T （显式，使用插值梯度）
-        double nonOrthCorr = properties.kappa() * (phiGrad[i] * T);
+        // // 非正交修正项：κ * (∇φ)_f · T （显式，使用插值梯度）
+        // double nonOrthCorr = properties.kappa() * (phiGrad[i] * T);
 
-        // 添加到源项（注意符号：owner流出为正，neighbour流入为负）
-        phiEqn.addTob(o, nonOrthCorr);
-        phiEqn.addTob(n, -nonOrthCorr);
+        // // 添加到源项（扩散项在方程左边，源项需要取负）
+        // phiEqn.addTob(o, nonOrthCorr);
+        // phiEqn.addTob(n, -nonOrthCorr);
     }
 
     // 2. 边界扩散

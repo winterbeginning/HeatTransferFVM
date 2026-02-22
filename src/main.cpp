@@ -14,7 +14,7 @@ int main()
 
     FiniteVolume fvm(mesh);
 
-    fvm.setSolveOption(true, false, false);
+    fvm.setSolveOption(false, true, false); // 开启扩散求解
     fvm.properties.setProperties(1.0, 1.0, 1.0, 0.001);
 
     Field<double>& T = fvm.T;
@@ -27,6 +27,9 @@ int main()
     T.setBoundary("down", 0.0, 0.0, 0.0);
     T.setBoundary("right", 0.0, 0.0, 0.0);
     T.setBoundary("top", 100.0, 0.0, 1.0);
+    // 三维楔形网格的Z方向边界（对于二维问题设置为绝热）
+    // T.setBoundary("Base", 0.0, 0.0, 0.0); // Neumann: 绝热
+    // T.setBoundary("Top", 0.0, 0.0, 0.0);  // Neumann: 绝热
 
     Field<Vector>& U = fvm.U;
 
@@ -38,6 +41,8 @@ int main()
     U.setBoundary("down", velocity, zero, 0.0);
     U.setBoundary("right", velocity, zero, 0.0);
     U.setBoundary("top", velocity, zero, 1.0);
+    // U.setBoundary("Base", zero, zero, 0.0); // Z方向：无速度，绝热
+    // U.setBoundary("Top", zero, zero, 0.0);  // Z方向：无速度，绝热
 
     Solver solver(5000, 1e-6, true, SolverType::GAUSS_SEIDEL);
 
