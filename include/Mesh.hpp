@@ -9,12 +9,20 @@
 #include <sstream>
 #include "Point3D.hpp"
 
+enum BoundaryType
+{
+    PATCH,
+    WALL,
+    EMPTY
+};
+
 // 定义边界组（Boundary Patches）
 struct BoundaryPatch
 {
     std::string name;
     int firstFaceIdx;
     int nFaces;
+    BoundaryType boundaryType;
 
     BoundaryPatch(const std::string& n, int first, int num)
         : name(n), firstFaceIdx(first), nFaces(num)
@@ -24,6 +32,15 @@ struct BoundaryPatch
     {
     }
 };
+
+inline std::string trim(const std::string& s)
+{
+    auto start = s.find_first_not_of(" \t\n\r");
+    auto end = s.find_last_not_of(" \t\n\r");
+    if (start == std::string::npos)
+        return "";
+    return s.substr(start, end - start + 1);
+}
 
 class Mesh
 {
@@ -150,9 +167,7 @@ public:
 
         while (std::getline(file, line))
         {
-            // 去除行首尾的空白字符（空格、制表符、换行符等），避免空行误判
-            line.erase(0, line.find_first_not_of(" \t\n\r"));
-            line.erase(line.find_last_not_of(" \t\n\r") + 1);
+            line = trim(line);
 
             if (line.find("(") != std::string::npos && !inDataBlock)
             {
@@ -376,17 +391,29 @@ public:
                 while (std::getline(file, line) &&
                        line.find("}") == std::string::npos)
                 {
-                    if (line.find("nFaces") != std::string::npos)
+                    if (line.find("type") != std::string::npos)
+                    {
+                        std::string sub = line.substr(line.find("type") + 4);
+                        std::string value = trim(sub.substr(0, sub.find(";")));
+                        if (value == "patch")
+                            patch.boundaryType = BoundaryType::PATCH;
+                        else if (value == "wall")
+                            patch.boundaryType = BoundaryType::WALL;
+                        else
+                            patch.boundaryType = BoundaryType::EMPTY;
+                    }
+                    else if (line.find("nFaces") != std::string::npos)
                     {
                         std::string sub = line.substr(line.find("nFaces") + 6);
-                        patch.nFaces = std::stoi(sub.substr(0, sub.find(";")));
+                        patch.nFaces =
+                            std::stoi(trim(sub.substr(0, sub.find(";"))));
                     }
                     else if (line.find("startFace") != std::string::npos)
                     {
                         std::string sub =
                             line.substr(line.find("startFace") + 9);
                         patch.firstFaceIdx =
-                            std::stoi(sub.substr(0, sub.find(";")));
+                            std::stoi(trim(sub.substr(0, sub.find(";"))));
                     }
                 }
                 boundary.push_back(patch);

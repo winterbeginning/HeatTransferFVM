@@ -15,11 +15,11 @@ void FiniteVolume::assembleMatrix(SpaceMatrix& Eqn, TimeScheme st, double dt)
 {
     if (Convective)
     {
-        SurfaceField<double> faceFlux = fvc::flux(U);
+        FaceField<double> faceFlux = fvc::flux(U);
         fvm::Div(Eqn, properties, faceFlux, T);
     }
     if (Diffusive)
-        fvm::Laplacian(Eqn, properties, T);
+        fvm::Laplacian(Eqn, properties, T, NonOrthogonalCorrection);
     if (Source)
         assembleSource(Eqn);
     if (st == TimeScheme::IMPLICIT)

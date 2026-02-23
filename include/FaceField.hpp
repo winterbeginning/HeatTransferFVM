@@ -1,18 +1,18 @@
-#ifndef _SurfaceField_
-#define _SurfaceField_
+#ifndef _FaceField_
+#define _FaceField_
 
 #include <vector>
 #include "Mesh.hpp"
 
 template <typename valType>
-class SurfaceField
+class FaceField
 {
 public:
     const Mesh& mesh;
 
     std::vector<valType> field;
 
-    SurfaceField(const Mesh& mesh, valType initVal = valType{}) : mesh(mesh)
+    FaceField(const Mesh& mesh, valType initVal = valType{}) : mesh(mesh)
     {
         field.assign(mesh.facePoints.size(), initVal);
     }

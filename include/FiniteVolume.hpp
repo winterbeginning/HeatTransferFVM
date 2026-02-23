@@ -23,6 +23,7 @@ public:
     bool Convective;
     bool Diffusive;
     bool Source;
+    bool NonOrthogonalCorrection;  // 非正交修正开关
 
     Field<double> T;
     Field<double> T_old;
@@ -38,6 +39,7 @@ public:
           Convective(false),
           Diffusive(true),
           Source(true),
+          NonOrthogonalCorrection(true),  // 默认开启非正交修正
           T(mesh),
           T_old(mesh),
           SourceT(mesh, 0.0),

@@ -50,9 +50,12 @@ public:
         boundaryField.assign(nBoundaryFaces, initVal);
 
         boundaryList.reserve(mesh.boundary.size());
-        for (const auto& patch : mesh.boundary)
+        for (auto& patch : mesh.boundary)
         {
-            boundaryList.emplace_back(patch);
+            BoundaryPatchDefinition fvPatch = BoundaryPatchDefinition(patch);
+            if (fvPatch.boundaryType == BoundaryType::EMPTY)
+                setBoundary(fvPatch, valType{}, valType{}, 0.0);
+            boundaryList.emplace_back(fvPatch);
         }
     }
 
@@ -79,6 +82,17 @@ public:
             }
         }
         throw std::runtime_error("Patch " + patchName + " not found!");
+    }
+
+    void setBoundary(BoundaryPatchDefinition& patch,
+                     valType refV,
+                     valType refG,
+                     double frac)
+    {
+        patch.refValue = refV;
+        patch.refGrad = refG;
+        patch.fraction = frac;
+        correctBoundaryField();
     }
 
     // 更新整个内部边界场 (基于当前单元中心值和 BC 参数)
