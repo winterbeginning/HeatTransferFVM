@@ -9,20 +9,20 @@
 // 边界条件结构
 
 // 场类：模拟 OpenFOAM 的 volField
-template <typename valType>
+template <typename ValueType>
 class Field
 {
 public:
     // 边界条件定义 (Boundary Condition Definition)
     struct BoundaryPatchDefinition : public BoundaryPatch
     {
-        valType refValue; // 给定的参考值 (Dirichlet)
-        valType refGrad;  // 给定的参考梯度 (Neumann)
-        double fraction;  // 1: Dirichlet, 0: Neumann
+        ValueType refValue; // 给定的参考值 (Dirichlet)
+        ValueType refGrad;  // 给定的参考梯度 (Neumann)
+        double fraction;    // 1: Dirichlet, 0: Neumann
         BoundaryPatchDefinition(const BoundaryPatch& patch)
             : BoundaryPatch(patch),
-              refValue(valType{}),
-              refGrad(valType{}),
+              refValue(ValueType{}),
+              refGrad(ValueType{}),
               fraction(1.0)
         {
         }
@@ -31,17 +31,17 @@ public:
     const Mesh& mesh;
 
     // 内部场 (Internal Field): 单元值
-    std::vector<valType> internalField;
-    std::vector<valType> oldInternalField;
+    std::vector<ValueType> internalField;
+    std::vector<ValueType> oldInternalField;
 
     // 边界条件参数
     std::vector<BoundaryPatchDefinition> boundaryList;
 
     // 缓存的边界面值 (Boundary Face Values): size = nBoundaryFaces
     // 对应索引从 mesh.nInternalFace 到 mesh.facePoints.size() - 1
-    std::vector<valType> boundaryField;
+    std::vector<ValueType> boundaryField;
 
-    Field(const Mesh& m, valType initVal = valType{}) : mesh(m)
+    Field(const Mesh& m, ValueType initVal = ValueType{}) : mesh(m)
     {
         internalField.assign(mesh.numCells, initVal);
         oldInternalField = internalField;
@@ -54,20 +54,20 @@ public:
         {
             BoundaryPatchDefinition fvPatch = BoundaryPatchDefinition(patch);
             if (fvPatch.boundaryType == BoundaryType::EMPTY)
-                setBoundary(fvPatch, valType{}, valType{}, 0.0);
+                setBoundary(fvPatch, ValueType{}, ValueType{}, 0.0);
             boundaryList.emplace_back(fvPatch);
         }
     }
 
-    void fill(const valType& val)
+    void fill(const ValueType& value)
     {
-        std::fill(internalField.begin(), internalField.end(), val);
+        std::fill(internalField.begin(), internalField.end(), value);
     };
 
     // 设置边界条件的参数
     void setBoundary(const std::string& patchName,
-                     valType refV,
-                     valType refG,
+                     ValueType refV,
+                     ValueType refG,
                      double frac)
     {
         for (auto& bc : boundaryList)
@@ -85,8 +85,8 @@ public:
     }
 
     void setBoundary(BoundaryPatchDefinition& patch,
-                     valType refV,
-                     valType refG,
+                     ValueType refV,
+                     ValueType refG,
                      double frac)
     {
         patch.refValue = refV;
@@ -109,9 +109,9 @@ public:
 
                 // 线性外推基础公式: phi_f = f * phi_ref + (1-f) * (phi_cell +
                 // grad_ref * d)
-                valType phi_face = bc.fraction * bc.refValue +
-                                   (1.0 - bc.fraction) *
-                                       (internalField[o] + bc.refGrad * dist);
+                ValueType phi_face = bc.fraction * bc.refValue +
+                                     (1.0 - bc.fraction) *
+                                         (internalField[o] + bc.refGrad * dist);
 
                 boundaryField[globalFaceId - mesh.nInternalFace] = phi_face;
             }
@@ -119,10 +119,10 @@ public:
     }
 
     // 获取特定边界 Patch 的 face values (用于插值/输出)
-    std::vector<valType> getPatchValues(int patchIdx) const
+    std::vector<ValueType> getPatchValues(int patchIdx) const
     {
         const auto& bc = boundaryList[patchIdx];
-        std::vector<valType> vals(bc.nFaces);
+        std::vector<ValueType> vals(bc.nFaces);
         for (int i = 0; i < bc.nFaces; ++i)
         {
             vals[i] = boundaryField[bc.firstFaceIdx + i - mesh.nInternalFace];
@@ -131,17 +131,17 @@ public:
     }
 
     // 获取特定全局面索引的边界值
-    const valType& getBoundaryFaceValue(int globalFaceId) const
+    const ValueType& getBoundaryFaceValue(int globalFaceId) const
     {
         return boundaryField[globalFaceId - mesh.nInternalFace];
     }
 
     // 获取特定单元的值 (辅助函数)
-    valType& operator[](int idx)
+    ValueType& operator[](int idx)
     {
         return internalField[idx];
     }
-    const valType& operator[](int idx) const
+    const ValueType& operator[](int idx) const
     {
         return internalField[idx];
     }
@@ -157,7 +157,7 @@ public:
         oldInternalField = internalField;
     }
 
-    const std::vector<valType>& oldField() const
+    const std::vector<ValueType>& oldField() const
     {
         return oldInternalField;
     }

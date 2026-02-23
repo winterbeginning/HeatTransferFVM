@@ -4,25 +4,25 @@
 #include <vector>
 #include "Mesh.hpp"
 
-template <typename valType>
+template <typename ValueType>
 class FaceField
 {
 public:
     const Mesh& mesh;
 
-    std::vector<valType> field;
+    std::vector<ValueType> field;
 
-    FaceField(const Mesh& mesh, valType initVal = valType{}) : mesh(mesh)
+    FaceField(const Mesh& mesh, ValueType initVal = ValueType{}) : mesh(mesh)
     {
         field.assign(mesh.facePoints.size(), initVal);
     }
 
     // 获取特定面的值
-    valType& operator[](int idx)
+    ValueType& operator[](int idx)
     {
         return field[idx];
     }
-    const valType& operator[](int idx) const
+    const ValueType& operator[](int idx) const
     {
         return field[idx];
     }

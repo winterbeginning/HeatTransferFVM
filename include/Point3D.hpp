@@ -8,13 +8,13 @@ using namespace std;
 
 #define sqr(num) pow(num, 2)
 
-template <typename val>
+template <typename ValueType>
 class Point3D
 {
 public:
-    val x, y, z;
+    ValueType x, y, z;
     Point3D() : x(0.0), y(0.0), z(0.0){};
-    Point3D(val x, val y, val z) : x(x), y(y), z(z){};
+    Point3D(ValueType x, ValueType y, ValueType z) : x(x), y(y), z(z){};
 
     double getMag()
     {

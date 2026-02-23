@@ -22,18 +22,18 @@ public:
     }
 
     // 核心组装接口
-    void addToA(int i, int j, double val)
+    void addToA(int i, int j, double value)
     {
         if (i < 0 || i >= n || j < 0 || j >= n)
             return;
-        assembly_A[i][j] += val;
+        assembly_A[i][j] += value;
     }
 
-    void addTob(int i, double val)
+    void addTob(int i, double value)
     {
         if (i < 0 || i >= n)
             return;
-        b[i] += val;
+        b[i] += value;
     }
 
     // 将 map 形式压缩为 CSR 形式
@@ -47,9 +47,9 @@ public:
         for (int i = 0; i < n; ++i)
         {
             csr_ptr[i] = current_nnz;
-            for (auto const& [j, val] : assembly_A[i])
+            for (auto const& [j, value] : assembly_A[i])
             {
-                csr_val.push_back(val);
+                csr_val.push_back(value);
                 csr_col.push_back(j);
                 current_nnz++;
             }

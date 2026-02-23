@@ -394,10 +394,11 @@ public:
                     if (line.find("type") != std::string::npos)
                     {
                         std::string sub = line.substr(line.find("type") + 4);
-                        std::string value = trim(sub.substr(0, sub.find(";")));
-                        if (value == "patch")
+                        std::string ValueTypeue =
+                            trim(sub.substr(0, sub.find(";")));
+                        if (ValueTypeue == "patch")
                             patch.boundaryType = BoundaryType::PATCH;
-                        else if (value == "wall")
+                        else if (ValueTypeue == "wall")
                             patch.boundaryType = BoundaryType::WALL;
                         else
                             patch.boundaryType = BoundaryType::EMPTY;

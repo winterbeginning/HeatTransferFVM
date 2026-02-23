@@ -9,9 +9,9 @@
 namespace fvc
 {
 // 基础线性插值（用于梯度计算和非正交网格）
-template <typename valType>
-inline void interpolate(const Field<valType>& cellField,
-                        FaceField<valType>& faceField)
+template <typename ValueType>
+inline void interpolate(const Field<ValueType>& cellField,
+                        FaceField<ValueType>& faceField)
 {
     const Mesh& mesh = cellField.mesh;
     // 内部面：距离加权线性插值
