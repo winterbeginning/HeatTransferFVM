@@ -30,6 +30,9 @@ inline void interpolate(const Field<ValueType>& cellField,
         faceField[i] = cellField[o] * (1.0 - gf) + cellField[n] * gf;
     }
 
+    auto field = const_cast<Field<ValueType>&>(cellField);
+    field.correctBoundaryField();
+
     // 边界：读取已维护的边界场值
     for (int i = mesh.nInternalFace; i < mesh.numFaces; ++i)
     {
@@ -130,34 +133,83 @@ inline void Ddt(SpaceMatrix<ValueType>& phiEqn,
     }
 }
 
-template <typename ValueType>
-// 修改 Div 以支持单元场和面质量通量
-inline void Div(SpaceMatrix<ValueType>& phiEqn,
+inline double limiter_minmod(double r)
+{
+    return std::max(0.0, std::min(1.0, r));
+}
+
+inline double limiter_vanleer(double r)
+{
+    double r_abs = std::abs(r);
+    return (r + r_abs) / (1 + r_abs);
+}
+
+inline double limiter_superbee(double r)
+{
+    return std::max({0.0, std::min(1.0, 2.0 * r), std::min(2.0, r)});
+}
+
+inline double
+get_correction(Vector& gradUp, const Vector& rCf, double phiUp, double phiDown)
+{
+    double dPhi_linear = gradUp.dotWith(rCf);
+    double dPhi_jump = phiDown - phiUp;
+
+    // 避免除以极小值
+    if (std::abs(dPhi_jump) < 1e-15)
+        return 0.0;
+
+    // r 的定义：上游预测斜率与实际台阶斜率的比值
+    double r = dPhi_jump / (2.0 * dPhi_linear + 1e-15);
+
+    // 使用限制器，注意：在梯度重构中，我们需要限制的是外推量
+    // 这里采用一种更稳健的写法：直接限制面中心值在 [Up, Down] 之间
+    double psi = limiter_vanleer(r);
+
+    // 如果预测方向与跳跃方向相反，psi 必为 0
+    // 如果预测过大，psi 也会通过 r 减小
+    return psi * dPhi_linear;
+}
+
+// template <typename ValueType>
+//  修改 Div 以支持单元场和面质量通量
+inline void Div(SpaceMatrix<double>& phiEqn,
                 const Properties& properties,
-                const FaceField<ValueType>& faceFlux,
-                const Field<ValueType>& phi)
+                const FaceField<double>& faceFlux,
+                const Field<double>& phi)
 {
     const Mesh& mesh = phi.mesh;
 
     FaceField<double> faceRho(mesh);
     fvc::interpolate(properties.rho(), faceRho);
+
+    Field<Vector> phiGrad = fvc::Grad(phi);
+
     // 1. 内部面 (Upwind)
     for (int i = 0; i < mesh.nInternalFace; ++i)
     {
         int o = mesh.owner[i];
         int n = mesh.neighbour[i];
-        ValueType flux = faceFlux[i] * faceRho[i];
+        double weightFlux = faceFlux[i] * faceRho[i];
 
-        if (flux > 0) // 流动方向 o --> n   面变量等于o单元
-        {
-            phiEqn.addToA(o, o, flux); // o单元方程，面变量来自o，流出为正
-            phiEqn.addToA(n, o, -flux); // n单元方程，面变量来自o，流入为负
-        }
-        else // 流动方向 n --> o   面变量等于n单元
-        {
-            phiEqn.addToA(o, n, flux); // o单元方程，面变量来自n，流入为负
-            phiEqn.addToA(n, n, -flux); // n单元方程，面变量来自n，流出为正
-        };
+        int up = (weightFlux > 0) ? o : n;
+        int down = (weightFlux > 0) ? n : o;
+
+        // 核心：基于梯度的线性重构
+        // phi_f = phi_up + psi * (grad_up . r_cf)
+        Vector rCf = mesh.faceCentres[i] - mesh.cellCentres[up];
+        double correction =
+            get_correction(phiGrad[up], rCf, phi[up], phi[down]);
+
+        // A 矩阵保持一阶上风，保证对角优势
+        phiEqn.addToA(o, up, weightFlux);  // 对o单元，外法相与Sf一致
+        phiEqn.addToA(n, up, -weightFlux); // 对o单元，外法相与Sf相反
+
+        // 高阶修正项放进 b 向量（延迟修正），放进 b 移项变为负
+        phiEqn.addTob(o, weightFlux * (-correction));
+        // 对o单元，外法相与Sf一致
+        phiEqn.addTob(n, -weightFlux * (-correction));
+        // 对o单元，外法相与Sf相反
     }
 
     // 2. 边界面 (根据边界流向决定使用单元值还是边界值)
@@ -172,7 +224,7 @@ inline void Div(SpaceMatrix<ValueType>& phiEqn,
         {
             int globalFaceId = fvPatch.firstFaceIdx + i;
             int o = mesh.owner[globalFaceId];
-            ValueType flux = faceFlux[globalFaceId] * faceRho[i];
+            double flux = faceFlux[globalFaceId] * faceRho[globalFaceId];
 
             if (flux > 0) // 流出
             {
@@ -180,12 +232,75 @@ inline void Div(SpaceMatrix<ValueType>& phiEqn,
             }
             else // 流入 (通过 b 累加背景源项)
             {
-                ValueType phi_face = phi.getBoundaryFaceValue(globalFaceId);
+                double phi_face = phi.getBoundaryFaceValue(globalFaceId);
                 phiEqn.addTob(o, -flux * phi_face);
             }
         }
     }
 }
+
+// inline void Div(SpaceMatrix<Vector>& phiEqn,
+//                 const Properties& properties,
+//                 const FaceField<Vector>& faceFlux,
+//                 const Field<Vector>& phi)
+// {
+//     const Mesh& mesh = phi.mesh;
+
+//     FaceField<double> faceRho(mesh);
+//     fvc::interpolate(properties.rho(), faceRho);
+
+//     Field<> FaceField<double> faceRho(mesh);
+//     fvc::interpolate(properties.rho(), faceRho);
+
+//     // 1. 内部面 (Upwind)
+//     for (int i = 0; i < mesh.nInternalFace; ++i)
+//     {
+//         int o = mesh.owner[i];
+//         int n = mesh.neighbour[i];
+//         Vector flux = faceFlux[i] * faceRho[i];
+
+//         if (flux > 0) // 流动方向 o --> n   面变量等于o单元
+//         {
+//             phiEqn.addToA(o, o, flux); // o单元方程，面变量来自o，流出为正
+//             phiEqn.addToA(n, o, -flux); // n单元方程，面变量来自o，流入为负
+//         }
+//         else // 流动方向 n --> o   面变量等于n单元
+//         {
+//             phiEqn.addToA(o, n, flux); // o单元方程，面变量来自n，流入为负
+//             phiEqn.addToA(n, n, -flux); // n单元方程，面变量来自n，流出为正
+//         };
+
+//         Vector fPoint = mesh.faceCentres[i];
+//         Vector ownerPoint = mesh.cellCentres[o];
+//         Vector Cf = fPoint - ownerPoint;
+//     }
+
+//     // 2. 边界面 (根据边界流向决定使用单元值还是边界值)
+//     for (int pIdx = 0; pIdx < (int)phi.boundaryList.size(); ++pIdx)
+//     {
+//         const auto& fvPatch = phi.boundaryList[pIdx];
+
+//         if (fvPatch.boundaryType == BoundaryType::EMPTY)
+//             continue;
+
+//         for (int i = 0; i < fvPatch.nFaces; ++i)
+//         {
+//             int globalFaceId = fvPatch.firstFaceIdx + i;
+//             int o = mesh.owner[globalFaceId];
+//             Vector flux = faceFlux[globalFaceId] * faceRho[i];
+
+//             if (flux > 0) // 流出
+//             {
+//                 phiEqn.addToA(o, o, flux);
+//             }
+//             else // 流入 (通过 b 累加背景源项)
+//             {
+//                 ValueType phi_face = phi.getBoundaryFaceValue(globalFaceId);
+//                 phiEqn.addTob(o, -flux * phi_face);
+//             }
+//         }
+//     }
+// }
 
 inline void Laplacian(SpaceMatrix<double>& phiEqn,
                       const Properties& properties,

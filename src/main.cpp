@@ -10,20 +10,20 @@ int main()
     Mesh mesh;
 
     // 选择网格类型（取消注释其中一个）
-    mesh.ReadFromFile("/home/winter/HeatTransferFVM/polyMesh");
-    // mesh.createSquareMesh(nx, ny, 1.0, 1.0);
+    // mesh.ReadFromFile("/home/winter/HeatTransferFVM/polyMesh");
+    mesh.createSquareMesh(nx, ny, 1.0, 1.0);
 
     std::cout << "--- Mesh Cells " << mesh.numCells << " ---" << std::endl;
 
     FiniteVolume fvm(mesh);
 
     // 求解选项：对流、扩散、源项
-    fvm.setSolveOption(false, true, false); // 开启扩散求解
+    fvm.setSolveOption(true, true, false); // 开启扩散求解
 
     // 非正交修正开关（仅对非结构网格有影响）
-    fvm.NonOrthogonalCorrection = false; // true=开启, false=关闭
+    fvm.NonOrthogonalCorrection = true; // true=开启, false=关闭
 
-    fvm.properties.setProperties(1.0, 1.0, 1.0, 0.001);
+    fvm.properties.setProperties(0.001, 1.0, 1.0, 0.001);
 
     Field<double>& T = fvm.T;
 
@@ -31,10 +31,10 @@ int main()
     T.fill(0.0);
 
     // 设置边界条件
-    T.setBoundary("left", 0.0, 0.0, 1.0);   // Dirichlet: 0°C
-    T.setBoundary("down", 100.0, 0.0, 1.0); // Dirichlet: 100°C
-    T.setBoundary("right", 0.0, 0.0, 0.0);  // Neumann: 绝热
-    T.setBoundary("top", 0.0, 0.0, 0.0);    // Neumann: 绝热
+    T.setBoundary("left", 0.0, 0.0, 1.0);  // Dirichlet: 0°C
+    T.setBoundary("down", 1.0, 0.0, 1.0);  // Dirichlet: 100°C
+    T.setBoundary("right", 0.0, 0.0, 0.0); // Neumann: 绝热
+    T.setBoundary("top", 0.0, 0.0, 0.0);   // Neumann: 绝热
 
     Field<Vector>& U = fvm.U;
 

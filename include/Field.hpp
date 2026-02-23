@@ -23,7 +23,7 @@ public:
             : BoundaryPatch(patch),
               refValue(ValueType{}),
               refGrad(ValueType{}),
-              fraction(1.0)
+              fraction(0.0)
         {
         }
 

@@ -66,8 +66,7 @@ public:
         {
             writeToTecplot("out_init.plt", 0.0, {{"T", &T}}, {{"U", &U}});
 
-            // 外层迭代：让非正交修正逐步收敛
-            int nOuterIter = 3;
+            int nOuterIter = 30;
             for (int outerIter = 0; outerIter < nOuterIter; ++outerIter)
             {
                 TEqn.clear();
