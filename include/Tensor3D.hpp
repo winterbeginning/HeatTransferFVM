@@ -19,6 +19,7 @@ class Tensor3D
     ValueType yx, yy, yz;
     ValueType zx, zy, zz;
 
+public:
     // 构造函数
     // 1. 默认构造：零张量
     Tensor3D() : xx(0), xy(0), xz(0), yx(0), yy(0), yz(0), zx(0), zy(0), zz(0)

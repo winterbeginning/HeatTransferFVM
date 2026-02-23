@@ -1,61 +1,68 @@
 #ifndef _Properties_
 #define _Properties_
 
+#include "Field.hpp"
+#include "Mesh.hpp"
+
 class Properties
 {
 private:
-    double kappa_; // Thermal conductivity
-    double rho_;
-    double Cp_;
-    double mu_;
+    Field<double> kappa_; // Thermal conductivity
+    Field<double> rho_;
+    Field<double> Cp_;
+    Field<double> mu_;
 
 public:
-    Properties() : kappa_(1.0), rho_(1.0), Cp_(1.0), mu_(1.0)
+    Properties(const Mesh& mesh)
+        : kappa_(mesh, 1.0), rho_(mesh, 1.0), Cp_(mesh, 1.0), mu_(mesh, 1.0)
     {
     }
-    Properties(double k, double rho, double Cp, double mu)
-        : kappa_(k), rho_(rho), Cp_(Cp), mu_(mu)
+    Properties(const Mesh& mesh, double k, double rho, double Cp, double mu)
+        : kappa_(mesh, k), rho_(mesh, rho), Cp_(mesh, Cp), mu_(mesh, mu)
     {
     }
     void setKappa(double kappa)
     {
-        this->kappa_ = kappa;
+        this->kappa_.fill(kappa);
     }
     void setRho(double rho)
     {
-        this->rho_ = rho;
+        this->rho_.fill(rho);
     }
     void setCp(double Cp)
     {
-        this->Cp_ = Cp;
+        this->Cp_.fill(Cp);
     }
     void setMu(double mu)
     {
-        this->mu_ = mu;
+        this->mu_.fill(mu);
     }
 
-    const double& kappa() const
+    const Field<double>& kappa() const
     {
         return kappa_;
     }
-    const double& rho() const
+    const Field<double>& rho() const
     {
         return rho_;
     }
-    const double& Cp() const
+    const Field<double>& Cp() const
     {
         return Cp_;
     }
-    const double& mu() const
+    const Field<double>& mu() const
     {
         return mu_;
     }
     void setProperties(double kappa, double rho, double Cp, double mu)
     {
-        this->kappa_ = kappa;
-        this->rho_ = rho;
-        this->Cp_ = Cp;
-        this->mu_ = mu;
+        this->kappa_.fill(kappa);
+        this->rho_.fill(rho);
+        this->Cp_.fill(Cp);
+        this->mu_.fill(mu);
+    }
+    void correct()
+    {
     }
 };
 

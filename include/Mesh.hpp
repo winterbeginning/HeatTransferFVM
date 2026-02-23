@@ -61,6 +61,7 @@ public:
 
     std::vector<BoundaryPatch> boundary;
     int numCells;
+    int numFaces;
 
     Mesh() : numCells(0)
     {
@@ -433,6 +434,8 @@ public:
         for (int n : neighbour)
             if (n != -1)
                 numCells = std::max(numCells, n + 1);
+
+        numFaces = facePoints.size();
 
         // 1. 自动判断维度
         bool is2D = true;

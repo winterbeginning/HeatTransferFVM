@@ -18,7 +18,7 @@ int main()
     FiniteVolume fvm(mesh);
 
     // 求解选项：对流、扩散、源项
-    fvm.setSolveOption(false, true, false); // 开启扩散求解
+    fvm.setSolveOption(true, false, false); // 开启扩散求解
 
     // 非正交修正开关（仅对非结构网格有影响）
     fvm.NonOrthogonalCorrection = true; // true=开启, false=关闭

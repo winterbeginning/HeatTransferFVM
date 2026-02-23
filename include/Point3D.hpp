@@ -4,6 +4,9 @@
 #include <ostream>
 #include <cmath>
 
+template <typename ValueType>
+class Tensor3D;
+
 using namespace std;
 
 #define sqr(num) pow(num, 2)
@@ -37,6 +40,20 @@ public:
 
         return Point3D(cx, cy, cz);
     }
+
+    Tensor3D<ValueType> outProductWith(const Point3D& v)
+    {
+        return Tensor3D(x * v.x,
+                        x * v.y,
+                        x * v.z,
+                        y * v.x,
+                        y * v.y,
+                        y * v.z,
+                        z * v.x,
+                        z * v.y,
+                        z * v.z);
+    }
+
     friend ostream& operator<<(ostream& out, const Point3D& rhs)
     {
         out << " " << rhs.x << "  " << rhs.y << "  " << rhs.z << "  ";

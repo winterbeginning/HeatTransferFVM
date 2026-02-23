@@ -23,7 +23,7 @@ public:
     bool Convective;
     bool Diffusive;
     bool Source;
-    bool NonOrthogonalCorrection;  // 非正交修正开关
+    bool NonOrthogonalCorrection; // 非正交修正开关
 
     Field<double> T;
     Field<double> T_old;
@@ -35,11 +35,11 @@ public:
 
     FiniteVolume(const Mesh& mesh)
         : mesh(mesh),
-          properties(1.0, 1.0, 1.0, 1.0),
+          properties(mesh, 1.0, 1.0, 1.0, 1.0),
           Convective(false),
           Diffusive(true),
           Source(true),
-          NonOrthogonalCorrection(true),  // 默认开启非正交修正
+          NonOrthogonalCorrection(true), // 默认开启非正交修正
           T(mesh),
           T_old(mesh),
           SourceT(mesh, 0.0),

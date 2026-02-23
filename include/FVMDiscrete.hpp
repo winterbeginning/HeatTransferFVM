@@ -5,6 +5,7 @@
 #include "Field.hpp"
 #include "Properties.hpp"
 #include "FaceField.hpp"
+#include "Tensor3D.hpp"
 
 namespace fvc
 {
@@ -30,7 +31,7 @@ inline void interpolate(const Field<ValueType>& cellField,
     }
 
     // 边界：读取已维护的边界场值
-    for (int i = mesh.nInternalFace; i < (int)mesh.facePoints.size(); ++i)
+    for (int i = mesh.nInternalFace; i < mesh.numFaces; ++i)
     {
         faceField[i] = cellField.getBoundaryFaceValue(i);
     }
@@ -79,6 +80,36 @@ inline Field<Vector> Grad(const Field<double>& phi)
     }
     return g;
 }
+
+inline Field<Tensor> Grad(const Field<Vector>& phi)
+{
+    const Mesh& mesh = phi.mesh;
+    Field<Tensor> g(mesh, Tensor());
+
+    FaceField<Vector> phi_f(mesh);
+    interpolate(phi, phi_f);
+
+    for (int i = 0; i < mesh.numFaces; ++i)
+    {
+        int o = mesh.owner[i];
+        Vector faceVector =
+            mesh.faceNormals[i] * mesh.faceAreas[i]; // S_f = n_f * A_f
+        Tensor flux = faceVector.outProductWith(phi_f[i]);
+
+        g.internalField[o] = g.internalField[o] + flux;
+        if (i < mesh.nInternalFace)
+        {
+            int n = mesh.neighbour[i];
+            g.internalField[n] = g.internalField[n] - flux;
+        }
+    }
+
+    for (int i = 0; i < mesh.numCells; ++i)
+    {
+        g.internalField[i] = g.internalField[i] / (mesh.cellVolumes[i] + 1e-20);
+    }
+    return g;
+}
 } // namespace fvc
 
 namespace fvm
@@ -92,7 +123,7 @@ inline void Ddt(SpaceMatrix& phiEqn,
     for (int i = 0; i < mesh.numCells; ++i)
     {
         double trans =
-            mesh.cellVolumes[i] * properties.rho() * properties.Cp() / dt;
+            mesh.cellVolumes[i] * properties.rho()[i] * properties.Cp()[i] / dt;
         phiEqn.addToA(i, i, trans);
         phiEqn.addTob(i, trans * phi.oldField()[i]);
     }
@@ -105,12 +136,15 @@ inline void Div(SpaceMatrix& phiEqn,
                 const Field<double>& phi)
 {
     const Mesh& mesh = phi.mesh;
+
+    FaceField<double> faceRho(mesh);
+    fvc::interpolate(properties.rho(), faceRho);
     // 1. 内部面 (Upwind)
     for (int i = 0; i < mesh.nInternalFace; ++i)
     {
         int o = mesh.owner[i];
         int n = mesh.neighbour[i];
-        double flux = faceFlux[i] * properties.rho();
+        double flux = faceFlux[i] * faceRho[i];
 
         if (flux > 0) // 流动方向 o --> n   面变量等于o单元
         {
@@ -136,7 +170,7 @@ inline void Div(SpaceMatrix& phiEqn,
         {
             int globalFaceId = fvPatch.firstFaceIdx + i;
             int o = mesh.owner[globalFaceId];
-            double flux = faceFlux[globalFaceId] * properties.rho();
+            double flux = faceFlux[globalFaceId] * faceRho[i];
 
             if (flux > 0) // 流出
             {
@@ -157,6 +191,9 @@ inline void Laplacian(SpaceMatrix& phiEqn,
                       bool enableNonOrthCorrection = true)
 {
     const Mesh& mesh = phi.mesh;
+
+    FaceField<double> faceKappa(mesh);
+    fvc::interpolate(properties.kappa(), faceKappa);
 
     // 计算梯度场（用于非正交修正）
     FaceField<Vector> phiGrad(mesh);
@@ -180,12 +217,12 @@ inline void Laplacian(SpaceMatrix& phiEqn,
         if (enableNonOrthCorrection)
         {
             // 非正交修正模式：deltaCoeff = κ|Sf|² / (Sf·d)
-            deltaCoeff = properties.kappa() * magSf * magSf / (SfdotD + 1e-30);
+            deltaCoeff = faceKappa[i] * magSf * magSf / (SfdotD + 1e-30);
         }
         else
         {
             // 简化正交模式：deltaCoeff = κ|Sf| / |d|
-            deltaCoeff = properties.kappa() * magSf / d.getMag();
+            deltaCoeff = faceKappa[i] * magSf / d.getMag();
         }
 
         // 添加到系数矩阵（隐式）
@@ -202,7 +239,7 @@ inline void Laplacian(SpaceMatrix& phiEqn,
             Vector T = Sf - Delta;
 
             // 非正交修正项：κ * (∇φ)_f · T （显式，使用插值梯度）
-            double nonOrthCorr = properties.kappa() * (phiGrad[i] * T);
+            double nonOrthCorr = faceKappa[i] * (phiGrad[i] * T);
 
             // 添加到源项（扩散项在方程左边，源项需要取负）
             phiEqn.addTob(o, nonOrthCorr);
@@ -231,15 +268,14 @@ inline void Laplacian(SpaceMatrix& phiEqn,
 
             // 边界的正交系数：deltaCoeff = |Sf|² / (Sf · d)
             double SfdotD = Sf * d;
-            double deltaCoeff =
-                properties.kappa() * magSf * magSf / (SfdotD + 1e-30);
+            double deltaCoeff = faceKappa[i] * magSf * magSf / (SfdotD + 1e-30);
 
             // 应用混合边界条件：fraction * fixedValue + (1-fraction) *
             // fixedGradient
             double coeff_implicit = deltaCoeff * fvPatch.fraction;
             double source_value =
                 deltaCoeff * fvPatch.fraction * fvPatch.refValue;
-            double source_grad = properties.kappa() * magSf *
+            double source_grad = faceKappa[i] * magSf *
                                  (1.0 - fvPatch.fraction) * fvPatch.refGrad;
 
             phiEqn.addToA(o, o, coeff_implicit);
