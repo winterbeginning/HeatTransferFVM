@@ -30,7 +30,6 @@ public:
     bool NonOrthogonalCorrection; // 非正交修正开关
 
     Field<double> T;
-    Field<double> T_old;
     Field<double> SourceT;
     Field<Vector> U;
 
@@ -45,7 +44,6 @@ public:
           Source(true),
           NonOrthogonalCorrection(true), // 默认开启非正交修正
           T(mesh),
-          T_old(mesh),
           SourceT(mesh, 0.0),
           U(mesh, Vector(1.0, 1.0, 0)),
           TEqn(mesh.numCells)
@@ -56,7 +54,52 @@ public:
     void solve(TimeScheme ts,
                Solver<ValueType>& solver,
                int maxSteps = 20,
-               double dt = 0.1);
+               double dt = 0.1)
+    {
+        prepareConnectivity();
+
+        // 初始修正边界
+        T.correctBoundaryField();
+        U.correctBoundaryField();
+
+        if (ts == TimeScheme::STEADY)
+        {
+            writeToTecplot("out_init.plt", 0.0, {{"T", &T}}, {{"U", &U}});
+
+            // 外层迭代：让非正交修正逐步收敛
+            int nOuterIter = 3;
+            for (int outerIter = 0; outerIter < nOuterIter; ++outerIter)
+            {
+                TEqn.clear();
+                assembleMatrix(TEqn, ts);
+                T.internalField = solver.solve(TEqn, T.internalField);
+                T.correctBoundaryField();
+                T.storeOldField();
+            }
+
+            writeToTecplot("out_steady.plt", 50.0, {{"T", &T}}, {{"U", &U}});
+        }
+        else if (ts == TimeScheme::IMPLICIT)
+        {
+            for (int step = 0; step <= maxSteps; ++step)
+            {
+                T.correctBoundaryField();
+                TEqn.clear();
+                assembleMatrix(TEqn, ts, dt);
+                T.internalField = solver.solve(TEqn, T.internalField);
+                T.correctBoundaryField();
+                T.storeOldField();
+                if (step % 5 == 0)
+                {
+                    std::cout << "Time step " << step << " done." << std::endl;
+                    writeToTecplot("out_" + std::to_string(step) + ".plt",
+                                   (double)step * dt,
+                                   {{"T", &T}},
+                                   {{"U", &U}});
+                }
+            }
+        }
+    }
 
     // 通用 Tecplot 输出函数
     void
@@ -79,10 +122,30 @@ private:
     void prepareConnectivity();
 
     template <typename ValueType>
-    void assembleSource(SpaceMatrix<ValueType>& A);
+    void assembleSource(SpaceMatrix<ValueType>& Eqn)
+    {
+        for (size_t i = 0; i < mesh.numCells; ++i)
+        {
+            Eqn.addTob(i, SourceT[i] * mesh.cellVolumes[i]);
+        }
+    }
+
     template <typename ValueType>
     void
-    assembleMatrix(SpaceMatrix<ValueType>& A, TimeScheme ts, double dt = 1.0);
+    assembleMatrix(SpaceMatrix<ValueType>& Eqn, TimeScheme st, double dt = 1.0)
+    {
+        if (Convective)
+        {
+            FaceField<double> faceFlux = fvc::flux(U);
+            fvm::Div(Eqn, properties, faceFlux, T);
+        }
+        if (Diffusive)
+            fvm::Laplacian(Eqn, properties, T, NonOrthogonalCorrection);
+        if (Source)
+            assembleSource(Eqn);
+        if (st == TimeScheme::IMPLICIT)
+            fvm::Ddt(Eqn, properties, T, dt);
+    }
 
     void writeField(ofstream& outfile, int nElements, Field<double> field)
     {
@@ -91,84 +154,6 @@ private:
         outfile << "\n";
     };
 };
-
-template <typename ValueType>
-void FiniteVolume::assembleSource(SpaceMatrix<ValueType>& Eqn)
-{
-    for (size_t i = 0; i < mesh.numCells; ++i)
-    {
-        Eqn.addTob(i, SourceT[i] * mesh.cellVolumes[i]);
-    }
-}
-
-template <typename ValueType>
-void FiniteVolume::assembleMatrix(SpaceMatrix<ValueType>& Eqn,
-                                  TimeScheme st,
-                                  double dt)
-{
-    if (Convective)
-    {
-        FaceField<double> faceFlux = fvc::flux(U);
-        fvm::Div(Eqn, properties, faceFlux, T);
-    }
-    if (Diffusive)
-        fvm::Laplacian(Eqn, properties, T, NonOrthogonalCorrection);
-    if (Source)
-        assembleSource(Eqn);
-    if (st == TimeScheme::IMPLICIT)
-        fvm::Ddt(Eqn, properties, T, dt);
-}
-
-template <typename ValueType>
-void FiniteVolume::solve(TimeScheme ts,
-                         Solver<ValueType>& solver,
-                         int maxSteps,
-                         double dt)
-{
-    prepareConnectivity();
-
-    // 初始修正边界
-    T.correctBoundaryField();
-    U.correctBoundaryField();
-
-    if (ts == TimeScheme::STEADY)
-    {
-        writeToTecplot("out_init.plt", 0.0, {{"T", &T}}, {{"U", &U}});
-
-        // 外层迭代：让非正交修正逐步收敛
-        int nOuterIter = 3;
-        for (int outerIter = 0; outerIter < nOuterIter; ++outerIter)
-        {
-            TEqn.clear();
-            assembleMatrix(TEqn, ts);
-            T.internalField = solver.solve(TEqn, T.internalField);
-            T.correctBoundaryField();
-            T.storeOldField();
-        }
-
-        writeToTecplot("out_steady.plt", 50.0, {{"T", &T}}, {{"U", &U}});
-    }
-    else if (ts == TimeScheme::IMPLICIT)
-    {
-        for (int step = 0; step <= maxSteps; ++step)
-        {
-            T.correctBoundaryField();
-            TEqn.clear();
-            assembleMatrix(TEqn, ts, dt);
-            T.internalField = solver.solve(TEqn, T.internalField);
-            T.correctBoundaryField();
-            T.storeOldField();
-            if (step % 5 == 0)
-            {
-                std::cout << "Time step " << step << " done." << std::endl;
-                writeToTecplot("out_" + std::to_string(step) + ".plt",
-                               (double)step * dt,
-                               {{"T", &T}},
-                               {{"U", &U}});
-            }
-        }
-    }
-}
 
 inline void FiniteVolume::writeToTecplot(
     const string& filePath,

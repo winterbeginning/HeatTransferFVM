@@ -26,6 +26,13 @@ public:
               fraction(1.0)
         {
         }
+
+        void setBoundary(ValueType refV, ValueType refG, double frac)
+        {
+            this->refValue = refV;
+            this->refGrad = refG;
+            this->fraction = frac;
+        }
     };
 
     const Mesh& mesh;
