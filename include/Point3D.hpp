@@ -70,10 +70,10 @@ public:
         return Point3D(a * x, a * y, a * z);
     }
 
-    double operator*(const Point3D& rhs) const
-    {
-        return (x * rhs.x + y * rhs.y + z * rhs.z);
-    }
+    // double operator*(const Point3D& rhs) const
+    // {
+    //     return (x * rhs.x + y * rhs.y + z * rhs.z);
+    // }
 
     Point3D operator/(const double a) const
     {
@@ -89,8 +89,33 @@ public:
     {
         return Point3D(x - rhs.x, y - rhs.y, z - rhs.z);
     }
+
+    Point3D operator*(const Point3D& rhs) const
+    {
+        return Point3D(x * rhs.x, y * rhs.y, z * rhs.z);
+    }
+
+    Point3D operator/(const Point3D& rhs) const
+    {
+        return Point3D(x / rhs.x, y / rhs.y, z / rhs.z);
+    }
+
+    Point3D& operator+=(const double& scalar)
+    {
+        x += scalar;
+        y += scalar;
+        z += scalar;
+        return *this;
+    }
+    Point3D& operator+=(const Point3D& rhs)
+    {
+        x += rhs.x;
+        y += rhs.y;
+        z += rhs.z;
+        return *this;
+    }
 };
 
-typedef Point3D<double> Vector;
+using Vector = Point3D<double>;
 
 #endif

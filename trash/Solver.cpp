@@ -1,10 +1,12 @@
 #include "Solver.hpp"
 #include <iostream>
 
-std::vector<double> Solver::solve(SpaceMatrix& Eqn,
-                                  const std::vector<double>& x0)
+template <typename ValueType>
+std::vector<ValueType>
+Solver<ValueType>::solve(SpaceMatrix<ValueType>& Eqn,
+                         const std::vector<ValueType>& x0)
 {
-    Eqn.compress(); // 求解前将组装好的 A 压缩为 CSR
+    Eqn.compress();
     switch (solverType)
     {
     case SolverType::JACOBI:
@@ -20,21 +22,44 @@ std::vector<double> Solver::solve(SpaceMatrix& Eqn,
     }
 }
 
-double Solver::dot(const std::vector<double>& v1, const std::vector<double>& v2)
+// dot 函数需要针对不同类型特化
+template <typename ValueType>
+inline ValueType Solver<ValueType>::dot(const std::vector<ValueType>& v1,
+                                        const std::vector<ValueType>& v2)
 {
-    double res = 0;
+    ValueType res = 0;
     for (size_t i = 0; i < v1.size(); ++i)
         res += v1[i] * v2[i];
     return res;
 }
 
-double Solver::norm(const std::vector<double>& v)
+// template <>
+// inline Vector Solver<Vector>::dot(const std::vector<Vector>& v1,
+//                                   const std::vector<Vector>& v2)
+// {
+//     Vector res(0, 0, 0);
+//     for (size_t i = 0; i < v1.size(); ++i)
+//         res = res + v1[i] % v2[i]; // 分量乘法
+//     return res;
+// }
+
+// norm 对所有类型通用
+template <typename ValueType>
+double Solver<ValueType>::norm(const std::vector<ValueType>& v)
 {
-    return std::sqrt(dot(v, v));
+    auto d = dot(v, v);
+    // 对 double: 直接 sqrt
+    // 对 Vector: 需要先取模
+    if constexpr (std::is_same_v<ValueType, double>)
+        return std::sqrt(d);
+    else
+        return std::sqrt(d.getMag()); // Vector 的模
 }
 
-std::vector<double> Solver::jacobi(const SpaceMatrix& Eqn,
-                                   const std::vector<double>& x0)
+template <typename ValueType>
+std::vector<ValueType>
+Solver<ValueType>::jacobi(const SpaceMatrix<ValueType>& Eqn,
+                          const std::vector<ValueType>& x0)
 {
     std::vector<double> x =
         (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
@@ -52,7 +77,7 @@ std::vector<double> Solver::jacobi(const SpaceMatrix& Eqn,
                 else
                     sum += Eqn.csr_val[k] * x[Eqn.csr_col[k]];
             }
-            x_new[i] = (Eqn.b[i] - sum) / diag;
+            x_new[i] = (Eqn.b[i] - sum) / diag; // Vector 需要重载 operator/
         }
         x = x_new;
         std::vector<double> r = Eqn.multiply(x);
@@ -73,46 +98,55 @@ std::vector<double> Solver::jacobi(const SpaceMatrix& Eqn,
     return x;
 }
 
-std::vector<double> Solver::gaussSeidel(const SpaceMatrix& Eqn,
-                                        const std::vector<double>& x0)
+// Gauss-Seidel (通用模板)
+template <typename ValueType>
+std::vector<ValueType>
+Solver<ValueType>::gaussSeidel(const SpaceMatrix<ValueType>& Eqn,
+                               const std::vector<ValueType>& x0)
 {
-    std::vector<double> x =
-        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
+    std::vector<ValueType> x = (x0.size() == (size_t)Eqn.n)
+                                   ? x0
+                                   : std::vector<ValueType>(Eqn.n, ValueType{});
+
     for (int iter = 0; iter < maxIter; ++iter)
     {
         for (int i = 0; i < Eqn.n; ++i)
         {
-            double diag = 0.0;
-            double sum = 0.0;
+            ValueType diag{};
+            ValueType sum{};
+
             for (int k = Eqn.csr_ptr[i]; k < Eqn.csr_ptr[i + 1]; ++k)
             {
                 if (Eqn.csr_col[k] == i)
                     diag = Eqn.csr_val[k];
                 else
-                    sum += Eqn.csr_val[k] * x[Eqn.csr_col[k]];
+                    sum = sum + Eqn.csr_val[k] * x[Eqn.csr_col[k]];
             }
-            x[i] = (Eqn.b[i] - sum) / diag;
+            x[i] = (Eqn.b[i] - sum) / diag; // Vector 需要重载 operator/
         }
-        std::vector<double> r = Eqn.multiply(x);
+
+        auto r = Eqn.multiply(x);
         for (int i = 0; i < Eqn.n; ++i)
-            r[i] -= Eqn.b[i];
+            r[i] = r[i] - Eqn.b[i];
+
         double res = norm(r);
         if (verbose && iter % 100 == 0)
-            std::cout << "[Gauss-Seidel] Iter " << iter << ", Residual: " << res
-                      << std::endl;
+            std::cout << "[GS] Iter " << iter << ", Res: " << res << std::endl;
+
         if (res < tol)
         {
             if (verbose)
-                std::cout << "[Gauss-Seidel] converged in " << iter
-                          << " iterations, Final Res: " << res << std::endl;
+                std::cout << "[GS] converged in " << iter << " iterations\n";
             return x;
         }
     }
     return x;
 }
 
-std::vector<double> Solver::conjugateGradient(const SpaceMatrix& Eqn,
-                                              const std::vector<double>& x0)
+template <typename ValueType>
+std::vector<ValueType>
+Solver<ValueType>::conjugateGradient(const SpaceMatrix<ValueType>& Eqn,
+                                     const std::vector<ValueType>& x0)
 {
     std::vector<double> x =
         (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
@@ -157,8 +191,10 @@ std::vector<double> Solver::conjugateGradient(const SpaceMatrix& Eqn,
     return x;
 }
 
-std::vector<double> Solver::bicgstab(const SpaceMatrix& Eqn,
-                                     const std::vector<double>& x0)
+template <typename ValueType>
+std::vector<ValueType>
+Solver<ValueType>::bicgstab(const SpaceMatrix<ValueType>& Eqn,
+                            const std::vector<ValueType>& x0)
 {
     std::vector<double> x =
         (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
@@ -235,3 +271,5 @@ std::vector<double> Solver::bicgstab(const SpaceMatrix& Eqn,
     }
     return x;
 }
+
+template class Solver<double>;

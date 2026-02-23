@@ -580,7 +580,7 @@ public:
                             Vector v2 = p2 - cellCentres[cellId];
                             Vector v3 = p3 - cellCentres[cellId];
                             double tetVol =
-                                std::abs(v1 * v2.crossWith(v3)) / 6.0;
+                                std::abs(v1.dotWith(v2.crossWith(v3))) / 6.0;
 
                             volWeightedCenter =
                                 volWeightedCenter + tetCenter * tetVol;
@@ -598,7 +598,7 @@ public:
         for (int i = 0; i < nFaces; ++i)
         {
             Vector dC = faceCentres[i] - cellCentres[owner[i]];
-            if (dC * faceNormals[i] < 0)
+            if (dC.dotWith(faceNormals[i]) < 0)
                 faceNormals[i] = faceNormals[i] * -1.0;
         }
 
@@ -609,15 +609,16 @@ public:
         for (int i = 0; i < nFaces; ++i)
         {
             // Owner单元的体积贡献
-            double dot_o =
-                (faceCentres[i] - cellCentres[owner[i]]) * faceNormals[i];
+            double dot_o = (faceCentres[i] - cellCentres[owner[i]])
+                               .dotWith(faceNormals[i]);
             cellVolumes[owner[i]] += dimInv * dot_o * faceAreas[i];
 
             // Neighbour单元的体积贡献（法向量反向）
             if (i < neighbour.size())
             {
-                double dot_n = (faceCentres[i] - cellCentres[neighbour[i]]) *
-                               faceNormals[i] * -1.0;
+                double dot_n = (faceCentres[i] - cellCentres[neighbour[i]])
+                                   .dotWith(faceNormals[i]) *
+                               -1.0;
                 cellVolumes[neighbour[i]] += dimInv * dot_n * faceAreas[i];
             }
         }

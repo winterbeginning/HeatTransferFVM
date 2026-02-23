@@ -192,6 +192,6 @@ public:
 };
 
 // 定义常用类型别名（和 Vector 对应）
-typedef Tensor3D<double> Tensor;
+using Tensor = Tensor3D<double>;
 
 #endif

@@ -1,64 +1,20 @@
-#ifndef _Solver_
-#define _Solver_
+#ifndef _Solver_TPP_
+#define _Solver_TPP_
 
-#include <vector>
-#include <cmath>
-#include "SpaceMatrix.hpp"
 #include <iostream>
+#include <type_traits>
 
-enum class SolverType
+// ============ 辅助函数：提取标量值 ============
+template <typename T>
+inline double extractScalar(const T& val)
 {
-    JACOBI,
-    GAUSS_SEIDEL,
-    CG,
-    BICGSTAB
-};
+    if constexpr (std::is_same_v<T, double>)
+        return val;
+    else
+        return val.getMag(); // 对 Vector/Tensor 调用 getMag()
+}
 
-template <typename ValueType = double>
-class Solver
-{
-private:
-    int maxIter;
-    double tol;
-    bool verbose;
-    SolverType solverType;
-
-public:
-    Solver(int maxIter = 1000,
-           double tol = 1e-6,
-           bool verbose = true,
-           SolverType solverType = SolverType::GAUSS_SEIDEL)
-        : maxIter(maxIter),
-          tol(tol),
-          verbose(verbose),
-          solverType(solverType){};
-
-    std::vector<ValueType> solve(SpaceMatrix<ValueType>& Eqn,
-                                 const std::vector<ValueType>& x0 = {});
-
-    std::vector<ValueType> jacobi(const SpaceMatrix<ValueType>& Eqn,
-                                  const std::vector<ValueType>& x0 = {});
-
-    std::vector<ValueType> gaussSeidel(const SpaceMatrix<ValueType>& Eqn,
-                                       const std::vector<ValueType>& x0 = {});
-
-    std::vector<ValueType>
-    conjugateGradient(const SpaceMatrix<ValueType>& Eqn,
-                      const std::vector<ValueType>& x0 = {});
-
-    std::vector<ValueType> bicgstab(const SpaceMatrix<ValueType>& Eqn,
-                                    const std::vector<ValueType>& x0 = {});
-
-private:
-    ValueType dot(const std::vector<ValueType>& v1,
-                  const std::vector<ValueType>& v2);
-    double norm(const std::vector<ValueType>& v);
-};
-
-// 类型别名（方便使用）
-using ScalarSolver = Solver<double>;
-using VectorSolver = Solver<Vector>;
-
+// ============ solve 主函数 ============
 template <typename ValueType>
 std::vector<ValueType>
 Solver<ValueType>::solve(SpaceMatrix<ValueType>& Eqn,
@@ -76,61 +32,61 @@ Solver<ValueType>::solve(SpaceMatrix<ValueType>& Eqn,
     case SolverType::BICGSTAB:
         return bicgstab(Eqn, x0);
     default:
-        return conjugateGradient(Eqn, x0);
+        return gaussSeidel(Eqn, x0);
     }
 }
 
-// dot 函数需要针对不同类型特化
+// ============ dot 函数 ============
 template <typename ValueType>
 inline ValueType Solver<ValueType>::dot(const std::vector<ValueType>& v1,
                                         const std::vector<ValueType>& v2)
 {
-    ValueType res = 0;
+    ValueType res{};
     for (size_t i = 0; i < v1.size(); ++i)
-        res += v1[i] * v2[i];
+        res = res + v1[i] * v2[i];
     return res;
 }
 
-// norm 对所有类型通用
+// ============ norm 函数 ============
 template <typename ValueType>
 double Solver<ValueType>::norm(const std::vector<ValueType>& v)
 {
     auto d = dot(v, v);
-    // 对 double: 直接 sqrt
-    // 对 Vector: 需要先取模
-    if constexpr (std::is_same_v<ValueType, double>)
-        return std::sqrt(d);
-    else
-        return std::sqrt(d.getMag()); // Vector 的模
+    return std::sqrt(extractScalar(d)); // 使用辅助函数
 }
 
+// ============ Jacobi ============
 template <typename ValueType>
 std::vector<ValueType>
 Solver<ValueType>::jacobi(const SpaceMatrix<ValueType>& Eqn,
                           const std::vector<ValueType>& x0)
 {
-    std::vector<double> x =
-        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
-    std::vector<double> x_new(Eqn.n, 0.0);
+    std::vector<ValueType> x = (x0.size() == (size_t)Eqn.n)
+                                   ? x0
+                                   : std::vector<ValueType>(Eqn.n, ValueType{});
+    std::vector<ValueType> x_new(Eqn.n, ValueType{});
+
     for (int iter = 0; iter < maxIter; ++iter)
     {
         for (int i = 0; i < Eqn.n; ++i)
         {
-            double diag = 0.0;
-            double sum = 0.0;
+            ValueType diag{};
+            ValueType sum{};
             for (int k = Eqn.csr_ptr[i]; k < Eqn.csr_ptr[i + 1]; ++k)
             {
                 if (Eqn.csr_col[k] == i)
                     diag = Eqn.csr_val[k];
                 else
-                    sum += Eqn.csr_val[k] * x[Eqn.csr_col[k]];
+                    sum = sum + Eqn.csr_val[k] * x[Eqn.csr_col[k]];
             }
-            x_new[i] = (Eqn.b[i] - sum) / diag; // Vector 需要重载 operator/
+            x_new[i] = (Eqn.b[i] - sum) / diag;
         }
         x = x_new;
-        std::vector<double> r = Eqn.multiply(x);
+
+        auto r = Eqn.multiply(x);
         for (int i = 0; i < Eqn.n; ++i)
-            r[i] -= Eqn.b[i];
+            r[i] = r[i] - Eqn.b[i];
+
         double res = norm(r);
         if (verbose && iter % 100 == 0)
             std::cout << "[Jacobi] Iter " << iter << ", Residual: " << res
@@ -146,7 +102,7 @@ Solver<ValueType>::jacobi(const SpaceMatrix<ValueType>& Eqn,
     return x;
 }
 
-// Gauss-Seidel (通用模板)
+// ============ Gauss-Seidel ============
 template <typename ValueType>
 std::vector<ValueType>
 Solver<ValueType>::gaussSeidel(const SpaceMatrix<ValueType>& Eqn,
@@ -170,7 +126,7 @@ Solver<ValueType>::gaussSeidel(const SpaceMatrix<ValueType>& Eqn,
                 else
                     sum = sum + Eqn.csr_val[k] * x[Eqn.csr_col[k]];
             }
-            x[i] = (Eqn.b[i] - sum) / diag; // Vector 需要重载 operator/
+            x[i] = (Eqn.b[i] - sum) / diag;
         }
 
         auto r = Eqn.multiply(x);
@@ -179,47 +135,55 @@ Solver<ValueType>::gaussSeidel(const SpaceMatrix<ValueType>& Eqn,
 
         double res = norm(r);
         if (verbose && iter % 100 == 0)
-            std::cout << "[GS] Iter " << iter << ", Res: " << res << std::endl;
+            std::cout << "[Gauss-Seidel] Iter " << iter << ", Res: " << res
+                      << std::endl;
 
         if (res < tol)
         {
             if (verbose)
-                std::cout << "[GS] converged in " << iter << " iterations\n";
+                std::cout << "[Gauss-Seidel] converged in " << iter
+                          << " iterations\n";
             return x;
         }
     }
     return x;
 }
 
+// ============ Conjugate Gradient ============
 template <typename ValueType>
 std::vector<ValueType>
 Solver<ValueType>::conjugateGradient(const SpaceMatrix<ValueType>& Eqn,
                                      const std::vector<ValueType>& x0)
 {
-    std::vector<double> x =
-        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
-    std::vector<double> r = Eqn.b;
-    std::vector<double> Ax = Eqn.multiply(x);
+    std::vector<ValueType> x = (x0.size() == (size_t)Eqn.n)
+                                   ? x0
+                                   : std::vector<ValueType>(Eqn.n, ValueType{});
+    std::vector<ValueType> r = Eqn.b;
+    std::vector<ValueType> Ax = Eqn.multiply(x);
     for (int i = 0; i < Eqn.n; ++i)
-        r[i] -= Ax[i];
-    std::vector<double> p = r;
-    double rsold = dot(r, r);
+        r[i] = r[i] - Ax[i];
+    std::vector<ValueType> p = r;
+
+    double rsold = extractScalar(dot(r, r)); // 使用辅助函数
 
     for (int iter = 0; iter < maxIter; ++iter)
     {
-        std::vector<double> Ap = Eqn.multiply(p);
-        double check_denom = dot(p, Ap);
+        std::vector<ValueType> Ap = Eqn.multiply(p);
+        double check_denom = extractScalar(dot(p, Ap)); // 使用辅助函数
+
         if (std::abs(check_denom) < 1e-20)
             break;
 
         double alpha = rsold / check_denom;
         for (int i = 0; i < Eqn.n; ++i)
         {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * Ap[i];
+            x[i] = x[i] + p[i] * alpha;
+            r[i] = r[i] - Ap[i] * alpha;
         }
-        double rsnew = dot(r, r);
+
+        double rsnew = extractScalar(dot(r, r)); // 使用辅助函数
         double res = std::sqrt(rsnew);
+
         if (verbose && iter % 100 == 0)
             std::cout << "[CG] Iter " << iter << ", Residual: " << res
                       << std::endl;
@@ -232,34 +196,37 @@ Solver<ValueType>::conjugateGradient(const SpaceMatrix<ValueType>& Eqn,
         }
         for (int i = 0; i < Eqn.n; ++i)
         {
-            p[i] = r[i] + (rsnew / rsold) * p[i];
+            p[i] = r[i] + p[i] * (rsnew / rsold);
         }
         rsold = rsnew;
     }
     return x;
 }
 
+// ============ BiCGSTAB ============
 template <typename ValueType>
 std::vector<ValueType>
 Solver<ValueType>::bicgstab(const SpaceMatrix<ValueType>& Eqn,
                             const std::vector<ValueType>& x0)
 {
-    std::vector<double> x =
-        (x0.size() == (size_t)Eqn.n) ? x0 : std::vector<double>(Eqn.n, 0.0);
-    std::vector<double> r = Eqn.b;
-    std::vector<double> Ax = Eqn.multiply(x);
+    std::vector<ValueType> x = (x0.size() == (size_t)Eqn.n)
+                                   ? x0
+                                   : std::vector<ValueType>(Eqn.n, ValueType{});
+    std::vector<ValueType> r = Eqn.b;
+    std::vector<ValueType> Ax = Eqn.multiply(x);
     for (int i = 0; i < Eqn.n; ++i)
-        r[i] -= Ax[i];
-    std::vector<double> r_star = r;
-    std::vector<double> p = r;
+        r[i] = r[i] - Ax[i];
+    std::vector<ValueType> r_star = r;
+    std::vector<ValueType> p = r;
 
     double rho = 1.0, alpha = 1.0, omega = 1.0;
-    std::vector<double> v(Eqn.n, 0.0), s(Eqn.n, 0.0);
+    std::vector<ValueType> v(Eqn.n, ValueType{}), s(Eqn.n, ValueType{});
 
     for (int iter = 0; iter < maxIter; ++iter)
     {
         double rho_prev = rho;
-        rho = dot(r_star, r);
+        rho = extractScalar(dot(r_star, r)); // 使用辅助函数
+
         if (std::abs(rho) < 1e-20)
             break;
 
@@ -268,40 +235,43 @@ Solver<ValueType>::bicgstab(const SpaceMatrix<ValueType>& Eqn,
             double beta = (rho / rho_prev) * (alpha / omega);
             for (int i = 0; i < Eqn.n; ++i)
             {
-                p[i] = r[i] + beta * (p[i] - omega * v[i]);
+                p[i] = r[i] + (p[i] - v[i] * omega) * beta;
             }
         }
 
         v = Eqn.multiply(p);
-        double denom = dot(r_star, v);
+        double denom = extractScalar(dot(r_star, v)); // 使用辅助函数
+
         if (std::abs(denom) < 1e-20)
             break;
 
         alpha = rho / denom;
         for (int i = 0; i < Eqn.n; ++i)
-            s[i] = r[i] - alpha * v[i];
+            s[i] = r[i] - v[i] * alpha;
 
         double res_s = norm(s);
         if (res_s < tol)
         {
             for (int i = 0; i < Eqn.n; ++i)
-                x[i] += alpha * p[i];
+                x[i] = x[i] + p[i] * alpha;
             if (verbose)
                 std::cout << "[BiCGSTAB] (early) converged in " << iter
                           << " iterations, Final Res: " << res_s << std::endl;
             return x;
         }
 
-        std::vector<double> t = Eqn.multiply(s);
-        double t_norm_sq = dot(t, t);
+        std::vector<ValueType> t = Eqn.multiply(s);
+        double t_norm_sq = extractScalar(dot(t, t)); // 使用辅助函数
+
         if (std::abs(t_norm_sq) < 1e-20)
             break;
 
-        omega = dot(t, s) / t_norm_sq;
+        omega = extractScalar(dot(t, s)) / t_norm_sq; // 使用辅助函数
+
         for (int i = 0; i < Eqn.n; ++i)
         {
-            x[i] += alpha * p[i] + omega * s[i];
-            r[i] = s[i] - omega * t[i];
+            x[i] = x[i] + p[i] * alpha + s[i] * omega;
+            r[i] = s[i] - t[i] * omega;
         }
 
         double res = norm(r);
@@ -313,7 +283,6 @@ Solver<ValueType>::bicgstab(const SpaceMatrix<ValueType>& Eqn,
             if (verbose)
                 std::cout << "[BiCGSTAB] converged in " << iter
                           << " iterations, Final Res: " << res << std::endl;
-
             return x;
         }
     }

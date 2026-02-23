@@ -3,33 +3,36 @@
 
 #include <vector>
 #include <map>
+#include "Point3D.hpp"
+#include "Tensor3D.hpp"
 
+template <typename ValueType>
 class SpaceMatrix
 {
 public:
     int n;
     // 每次组装用的临时存储，结束后会被压缩为 CSR 格式
-    std::vector<std::map<int, double>> assembly_A;
-    std::vector<double> b;
+    std::vector<std::map<int, ValueType>> assembly_A;
+    std::vector<ValueType> b;
 
     // CSR 数据结构
-    std::vector<double> csr_val;
+    std::vector<ValueType> csr_val;
     std::vector<int> csr_col;
     std::vector<int> csr_ptr;
 
-    SpaceMatrix(int n) : n(n), assembly_A(n), b(n, 0.0)
+    SpaceMatrix(int n) : n(n), assembly_A(n), b(n, ValueType{})
     {
     }
 
     // 核心组装接口
-    void addToA(int i, int j, double value)
+    void addToA(int i, int j, ValueType value)
     {
         if (i < 0 || i >= n || j < 0 || j >= n)
             return;
         assembly_A[i][j] += value;
     }
 
-    void addTob(int i, double value)
+    void addTob(int i, ValueType value)
     {
         if (i < 0 || i >= n)
             return;
@@ -68,10 +71,43 @@ public:
         csr_ptr.clear();
     }
 
+    // // 当 ValueType 为 double 时启用
+    // template <typename U = ValueType>
+    // std::enable_if_t<std::is_same_v<U, double>, std::vector<U>>
+    // multiply(const std::vector<U>& x) const
+    // {
+    //     std::vector<U> res(n, U{});
+    //     for (int i = 0; i < n; ++i)
+    //     {
+    //         for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
+    //         {
+    //             res[i] += csr_val[k] * x[csr_col[k]];
+    //         }
+    //     }
+    //     return res;
+    // }
+
+    // // 当 ValueType 为 Vector 时启用
+    // template <typename U = ValueType>
+    // std::enable_if_t<std::is_same_v<U, Vector>, std::vector<U>>
+    // multiply(const std::vector<U>& x) const
+    // {
+    //     std::vector<U> res(n, U{});
+    //     for (int i = 0; i < n; ++i)
+    //     {
+    //         for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
+    //         {
+    //             // 假设 Vector 重载了 % 作为分量乘法
+    //             res[i] += csr_val[k] % x[csr_col[k]];
+    //         }
+    //     }
+    //     return res;
+    // }
+
     // CSR 矩阵-向量乘法
-    std::vector<double> multiply(const std::vector<double>& x) const
+    std::vector<ValueType> multiply(const std::vector<ValueType>& x) const
     {
-        std::vector<double> res(n, 0.0);
+        std::vector<ValueType> res(n, ValueType{});
         for (int i = 0; i < n; ++i)
         {
             for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
@@ -83,14 +119,14 @@ public:
     }
 
     // 获取对角线元素（基于 CSR 查找）
-    double diag(int i) const
+    ValueType diag(int i) const
     {
         for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
         {
             if (csr_col[k] == i)
                 return csr_val[k];
         }
-        return 0.0;
+        return ValueType{};
     }
 
     int size() const
@@ -98,5 +134,9 @@ public:
         return n;
     }
 };
+
+using ScalarMatrix = SpaceMatrix<double>;
+using VectorMatrix = SpaceMatrix<Vector>;
+using TensorMatrix = SpaceMatrix<Tensor>;
 
 #endif

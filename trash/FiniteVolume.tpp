@@ -1,9 +1,13 @@
-#include "FiniteVolume.hpp"
+#ifndef _FiniteVolume_TPP_
+#define _FiniteVolume_TPP_
+
+// #include "FiniteVolume.hpp"
 #include "FVMDiscrete.hpp"
 #include <iostream>
 #include <cmath>
 
-void FiniteVolume::assembleSource(SpaceMatrix& Eqn)
+template <typename ValueType>
+void FiniteVolume::assembleSource(SpaceMatrix<ValueType>& Eqn)
 {
     for (size_t i = 0; i < mesh.numCells; ++i)
     {
@@ -11,7 +15,10 @@ void FiniteVolume::assembleSource(SpaceMatrix& Eqn)
     }
 }
 
-void FiniteVolume::assembleMatrix(SpaceMatrix& Eqn, TimeScheme st, double dt)
+template <typename ValueType>
+void FiniteVolume::assembleMatrix(SpaceMatrix<ValueType>& Eqn,
+                                  TimeScheme st,
+                                  double dt)
 {
     if (Convective)
     {
@@ -26,11 +33,13 @@ void FiniteVolume::assembleMatrix(SpaceMatrix& Eqn, TimeScheme st, double dt)
         fvm::Ddt(Eqn, properties, T, dt);
 }
 
-void FiniteVolume::solve(TimeScheme ts, Solver& solver, int maxSteps, double dt)
+template <typename ValueType>
+void FiniteVolume::solve(TimeScheme ts,
+                         Solver<ValueType>& solver,
+                         int maxSteps,
+                         double dt)
 {
     prepareConnectivity();
-
-    // 初始修正边界
     T.correctBoundaryField();
     U.correctBoundaryField();
 
@@ -38,7 +47,6 @@ void FiniteVolume::solve(TimeScheme ts, Solver& solver, int maxSteps, double dt)
     {
         writeToTecplot("out_init.plt", 0.0, {{"T", &T}}, {{"U", &U}});
 
-        // 外层迭代：让非正交修正逐步收敛
         int nOuterIter = 3;
         for (int outerIter = 0; outerIter < nOuterIter; ++outerIter)
         {
@@ -72,3 +80,5 @@ void FiniteVolume::solve(TimeScheme ts, Solver& solver, int maxSteps, double dt)
         }
     }
 }
+
+#endif
