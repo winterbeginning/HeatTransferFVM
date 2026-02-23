@@ -41,7 +41,4 @@ public:
     }
 };
 
-using fvScalarMatrix = fvMatrix<double>;
-using fvVectorMatrix = fvMatrix<Vector>;
-
 #endif

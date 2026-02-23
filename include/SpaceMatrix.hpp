@@ -3,8 +3,6 @@
 
 #include <vector>
 #include <map>
-#include "Point3D.hpp"
-#include "Tensor3D.hpp"
 
 template <typename ValueType>
 class SpaceMatrix
@@ -70,39 +68,6 @@ public:
         csr_col.clear();
         csr_ptr.clear();
     }
-
-    // // 当 ValueType 为 double 时启用
-    // template <typename U = ValueType>
-    // std::enable_if_t<std::is_same_v<U, double>, std::vector<U>>
-    // multiply(const std::vector<U>& x) const
-    // {
-    //     std::vector<U> res(n, U{});
-    //     for (int i = 0; i < n; ++i)
-    //     {
-    //         for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
-    //         {
-    //             res[i] += csr_val[k] * x[csr_col[k]];
-    //         }
-    //     }
-    //     return res;
-    // }
-
-    // // 当 ValueType 为 Vector 时启用
-    // template <typename U = ValueType>
-    // std::enable_if_t<std::is_same_v<U, Vector>, std::vector<U>>
-    // multiply(const std::vector<U>& x) const
-    // {
-    //     std::vector<U> res(n, U{});
-    //     for (int i = 0; i < n; ++i)
-    //     {
-    //         for (int k = csr_ptr[i]; k < csr_ptr[i + 1]; ++k)
-    //         {
-    //             // 假设 Vector 重载了 % 作为分量乘法
-    //             res[i] += csr_val[k] % x[csr_col[k]];
-    //         }
-    //     }
-    //     return res;
-    // }
 
     // CSR 矩阵-向量乘法
     std::vector<ValueType> multiply(const std::vector<ValueType>& x) const

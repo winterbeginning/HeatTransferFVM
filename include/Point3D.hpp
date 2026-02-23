@@ -28,11 +28,11 @@ public:
     {
         return sqrt(sqr(x - v.x) + sqr(y - v.y) + sqr(z - v.z));
     };
-    double dotWith(const Point3D& v)
+    double dotWith(const Point3D& v) const
     {
         return x * v.x + y * v.y + z * v.z;
     }
-    Point3D crossWith(const Point3D& v)
+    Point3D crossWith(const Point3D& v) const
     {
         double cx = y * v.z - z * v.y;
         double cy = z * v.x - x * v.z;
@@ -41,7 +41,7 @@ public:
         return Point3D(cx, cy, cz);
     }
 
-    Tensor3D<ValueType> outProductWith(const Point3D& v)
+    Tensor3D<ValueType> outProductWith(const Point3D& v) const
     {
         return Tensor3D(x * v.x,
                         x * v.y,
@@ -70,14 +70,14 @@ public:
         return Point3D(a * x, a * y, a * z);
     }
 
-    // double operator*(const Point3D& rhs) const
-    // {
-    //     return (x * rhs.x + y * rhs.y + z * rhs.z);
-    // }
-
     Point3D operator/(const double a) const
     {
         return Point3D(x / a, y / a, z / a);
+    }
+
+    Point3D operator-() const
+    {
+        return Point3D(-x, -y, -z);
     }
 
     Point3D operator+(const Point3D& rhs) const

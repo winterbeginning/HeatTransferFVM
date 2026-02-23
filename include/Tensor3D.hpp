@@ -117,6 +117,11 @@ public:
                         zz - rhs.zz);
     }
 
+    Tensor3D operator-() const
+    {
+        return Tensor3D(-xx, -xy, -xz, -yx, -yy, -yz, -zx, -zy, -zz);
+    }
+
     // 8. 标量乘法（张量*标量）
     Tensor3D operator*(const double a) const
     {
