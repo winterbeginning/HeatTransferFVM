@@ -55,10 +55,6 @@ private:
     double norm(const std::vector<ValueType>& v);
 };
 
-// 类型别名（方便使用）
-using ScalarSolver = Solver<double>;
-using VectorSolver = Solver<Vector>;
-
 template <typename ValueType>
 std::vector<ValueType>
 Solver<ValueType>::solve(SpaceMatrix<ValueType>& Eqn,

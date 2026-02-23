@@ -1,528 +1,459 @@
-#ifndef _FiniteVolume_
-#define _FiniteVolume_
+#ifndef _FVMDiscrete_
+#define _FVMDiscrete_
 
-#include "Mesh.hpp"
-#include "Solver.hpp"
+#include "SpaceMatrix.hpp"
 #include "Field.hpp"
-#include "Point3D.hpp"
 #include "Properties.hpp"
-#include <fstream>
-#include <algorithm>
+#include "FaceField.hpp"
+#include "Tensor3D.hpp"
 
-#include "FVMDiscrete.hpp"
-#include <iostream>
-#include <cmath>
-
-enum class TimeScheme
+namespace fvc
 {
-    STEADY,
-    IMPLICIT
-};
-
-class FiniteVolume
+// 基础线性插值（用于梯度计算和非正交网格）
+template <typename ValueType>
+inline void interpolate(const Field<ValueType>& cellField,
+                        FaceField<ValueType>& faceField)
 {
-public:
-    const Mesh& mesh;
-    Properties properties;
-    bool Convective;
-    bool Diffusive;
-    bool Source;
-    bool NonOrthogonalCorrection; // 非正交修正开关
-
-    Field<double> T;
-    Field<double> SourceT;
-    Field<Vector> U;
-
-    // 对矩阵实例进行复用，避免每一时间步或迭代都重新申请内存
-    SpaceMatrix<double> TEqn;
-
-    FiniteVolume(const Mesh& mesh)
-        : mesh(mesh),
-          properties(mesh, 1.0, 1.0, 1.0, 1.0),
-          Convective(false),
-          Diffusive(true),
-          Source(true),
-          NonOrthogonalCorrection(true), // 默认开启非正交修正
-          T(mesh),
-          SourceT(mesh, 0.0),
-          U(mesh, Vector(1.0, 1.0, 0)),
-          TEqn(mesh.numCells)
+    const Mesh& mesh = cellField.mesh;
+    // 内部面：距离加权线性插值
+    for (int i = 0; i < mesh.nInternalFace; ++i)
     {
+        int o = mesh.owner[i];
+        int n = mesh.neighbour[i];
+
+        // 计算插值因子：基于面中心到单元中心的距离
+        Vector d = mesh.cellCentres[n] - mesh.cellCentres[o];
+        Vector f = mesh.faceCentres[i] - mesh.cellCentres[o];
+        double gf = (f.dotWith(d)) / (d.dotWith(d)); // 插值权重
+        gf = std::max(0.0, std::min(1.0, gf));       // 限制在[0,1]
+
+        faceField[i] = cellField[o] * (1.0 - gf) + cellField[n] * gf;
     }
 
-    template <typename ValueType>
-    void solve(TimeScheme ts,
-               Solver<ValueType>& solver,
-               int maxSteps = 20,
-               double dt = 0.1)
+    auto field = const_cast<Field<ValueType>&>(cellField);
+    field.correctBoundaryField();
+
+    // 边界：读取已维护的边界场值
+    for (int i = mesh.nInternalFace; i < mesh.numFaces; ++i)
     {
-        prepareConnectivity();
-
-        // 初始修正边界
-        T.correctBoundaryField();
-        U.correctBoundaryField();
-
-        if (ts == TimeScheme::STEADY)
-        {
-            writeToTecplot("out_init.plt", 0.0, {{"T", &T}}, {{"U", &U}});
-
-            int nOuterIter = 30;
-            for (int outerIter = 0; outerIter < nOuterIter; ++outerIter)
-            {
-                TEqn.clear();
-                assembleMatrix(TEqn, ts);
-                T.internalField = solver.solve(TEqn, T.internalField);
-                T.correctBoundaryField();
-                T.storeOldField();
-            }
-
-            writeToTecplot("out_steady.plt", 50.0, {{"T", &T}}, {{"U", &U}});
-        }
-        else if (ts == TimeScheme::IMPLICIT)
-        {
-            for (int step = 0; step <= maxSteps; ++step)
-            {
-                T.correctBoundaryField();
-                TEqn.clear();
-                assembleMatrix(TEqn, ts, dt);
-                T.internalField = solver.solve(TEqn, T.internalField);
-                T.correctBoundaryField();
-                T.storeOldField();
-                if (step % 5 == 0)
-                {
-                    std::cout << "Time step " << step << " done." << std::endl;
-                    writeToTecplot("out_" + std::to_string(step) + ".plt",
-                                   (double)step * dt,
-                                   {{"T", &T}},
-                                   {{"U", &U}});
-                }
-            }
-        }
+        faceField[i] = cellField.getBoundaryFaceValue(i);
     }
-
-    // 通用 Tecplot 输出函数
-    void
-    writeToTecplot(const string& filePath,
-                   double time = 0.0,
-                   const std::vector<std::pair<std::string, Field<double>*>>&
-                       scalarFields = {},
-                   const std::vector<std::pair<std::string, Field<Vector>*>>&
-                       vectorFields = {});
-
-    void setSolveOption(bool Convective, bool Diffusive, bool Source)
-    {
-        this->Convective = Convective;
-        this->Diffusive = Diffusive;
-        this->Source = Source;
-    }
-
-private:
-    std::vector<std::vector<int>> cachedConnectivity;
-    void prepareConnectivity();
-
-    template <typename ValueType>
-    void assembleSource(SpaceMatrix<ValueType>& Eqn)
-    {
-        for (size_t i = 0; i < mesh.numCells; ++i)
-        {
-            Eqn.addTob(i, SourceT[i] * mesh.cellVolumes[i]);
-        }
-    }
-
-    template <typename ValueType>
-    void
-    assembleMatrix(SpaceMatrix<ValueType>& Eqn, TimeScheme st, double dt = 1.0)
-    {
-        if (Convective)
-        {
-            FaceField<double> faceFlux = fvc::flux(U);
-            fvm::Div(Eqn, properties, faceFlux, T);
-        }
-        if (Diffusive)
-            fvm::Laplacian(Eqn, properties, T, NonOrthogonalCorrection);
-        if (Source)
-            assembleSource(Eqn);
-        if (st == TimeScheme::IMPLICIT)
-            fvm::Ddt(Eqn, properties, T, dt);
-    }
-
-    void writeField(ofstream& outfile, int nElements, Field<double> field)
-    {
-        for (int i = 0; i < nElements; ++i)
-            outfile << field[i] << ((i + 1) % 10 == 0 ? "\n" : " ");
-        outfile << "\n";
-    };
-};
-
-inline void FiniteVolume::writeToTecplot(
-    const string& filePath,
-    double time,
-    const std::vector<std::pair<std::string, Field<double>*>>& scalarFields,
-    const std::vector<std::pair<std::string, Field<Vector>*>>& vectorFields)
-{
-    prepareConnectivity();
-
-    std::ofstream outfile(filePath);
-    if (!outfile.is_open())
-    {
-        std::cerr << "Error: Could not open " << filePath << " for writing!"
-                  << std::endl;
-        return;
-    }
-
-    int nNodes = mesh.points.size();
-    int nElems = mesh.numCells;
-
-    // 1. 检测网格维度
-    bool is3D = false;
-    for (const auto& pt : mesh.points)
-    {
-        if (std::abs(pt.z) > 1e-10)
-        {
-            is3D = true;
-            break;
-        }
-    }
-
-    // 2. 检测单元类型（通过第一个单元的节点数判断）
-    int nodesPerElement =
-        cachedConnectivity.empty() ? 0 : cachedConnectivity[0].size();
-    std::string zoneType;
-    bool needsDegenerateConversion = false; // 标记是否需要退化转换
-
-    if (is3D)
-    {
-        if (nodesPerElement == 8)
-            zoneType = "FEBRICK"; // 六面体
-        else if (nodesPerElement == 6)
-        {
-            // 楔形（棱柱）：Tecplot 不直接支持，转换为退化的六面体
-            zoneType = "FEBRICK";
-            needsDegenerateConversion = true;
-            nodesPerElement = 8; // 输出时需要 8 个节点
-        }
-        else if (nodesPerElement == 5)
-        {
-            // 金字塔：也转换为退化的六面体
-            zoneType = "FEBRICK";
-            needsDegenerateConversion = true;
-            nodesPerElement = 8;
-        }
-        else if (nodesPerElement == 4)
-            zoneType = "FETETRAHEDRON"; // 四面体
-        else
-        {
-            // 其他多面体：尝试使用 FEPOLYHEDRON（需要 Tecplot 360）
-            zoneType = "FEBRICK";
-            needsDegenerateConversion = true;
-            nodesPerElement = 8;
-            std::cerr << "Warning: Cell has " << cachedConnectivity[0].size()
-                      << " nodes. Converting to degenerate hexahedron."
-                      << std::endl;
-        }
-    }
-    else
-    {
-        if (nodesPerElement == 4)
-            zoneType = "FEQUADRILATERAL"; // 四边形
-        else if (nodesPerElement == 3)
-            zoneType = "FETRIANGLE"; // 三角形
-        else
-            zoneType = "FEPOLYGON"; // 多边形
-    }
-
-    // 3. 构建变量列表
-    std::vector<std::string> varNames;
-    varNames.push_back("X");
-    varNames.push_back("Y");
-    if (is3D)
-        varNames.push_back("Z");
-
-    // 添加标量场名称
-    for (const auto& sf : scalarFields)
-        varNames.push_back(sf.first);
-
-    // 添加矢量场分量名称
-    for (const auto& vf : vectorFields)
-    {
-        varNames.push_back(vf.first + "_X");
-        varNames.push_back(vf.first + "_Y");
-        if (is3D)
-            varNames.push_back(vf.first + "_Z");
-    }
-
-    // 4. 写入文件头
-    outfile << "TITLE = \"FVM Results\"" << std::endl;
-    outfile << "VARIABLES = ";
-    for (size_t i = 0; i < varNames.size(); ++i)
-    {
-        outfile << "\"" << varNames[i] << "\"";
-        if (i < varNames.size() - 1)
-            outfile << ", ";
-    }
-    outfile << std::endl;
-
-    // 5. 构建 VARLOCATION 字符串（场变量在单元中心）
-    std::string varLocation;
-    int coordCount = is3D ? 3 : 2;
-    int totalVars = varNames.size();
-    if (totalVars > coordCount)
-    {
-        varLocation = "VARLOCATION=([" + std::to_string(coordCount + 1) + "-" +
-                      std::to_string(totalVars) + "]=CELLCENTERED)";
-    }
-
-    // 6. 写入区域头
-    outfile << "ZONE T=\"InternalField\", " << "NODES=" << nNodes << ", "
-            << "ELEMENTS=" << nElems << ", " << "DATAPACKING=BLOCK, "
-            << "ZONETYPE=" << zoneType;
-    if (!varLocation.empty())
-        outfile << ", " << varLocation;
-    outfile << ", STRANDID=1, SOLUTIONTIME=" << time << std::endl;
-
-    // 7. 写入节点坐标（BLOCK 格式）
-    // X 坐标
-    for (int i = 0; i < nNodes; ++i)
-        outfile << mesh.points[i].x << ((i + 1) % 10 == 0 ? "\n" : " ");
-    outfile << "\n";
-
-    // Y 坐标
-    for (int i = 0; i < nNodes; ++i)
-        outfile << mesh.points[i].y << ((i + 1) % 10 == 0 ? "\n" : " ");
-    outfile << "\n";
-
-    // Z 坐标（3D）
-    if (is3D)
-    {
-        for (int i = 0; i < nNodes; ++i)
-            outfile << mesh.points[i].z << ((i + 1) % 10 == 0 ? "\n" : " ");
-        outfile << "\n";
-    }
-
-    // 8. 写入标量场（CELLCENTERED）
-    for (const auto& sf : scalarFields)
-    {
-        writeField(outfile, nElems, *sf.second);
-    }
-
-    // 9. 写入矢量场（CELLCENTERED）
-    for (const auto& vf : vectorFields)
-    {
-        // X 分量
-        for (int i = 0; i < nElems; ++i)
-            outfile << (*vf.second)[i].x << ((i + 1) % 10 == 0 ? "\n" : " ");
-        outfile << "\n";
-
-        // Y 分量
-        for (int i = 0; i < nElems; ++i)
-            outfile << (*vf.second)[i].y << ((i + 1) % 10 == 0 ? "\n" : " ");
-        outfile << "\n";
-
-        // Z 分量（3D）
-        if (is3D)
-        {
-            for (int i = 0; i < nElems; ++i)
-                outfile << (*vf.second)[i].z
-                        << ((i + 1) % 10 == 0 ? "\n" : " ");
-            outfile << "\n";
-        }
-    }
-
-    // 10. 写入连接性（Connectivity）
-    for (int i = 0; i < nElems; ++i)
-    {
-        const auto& nodes = cachedConnectivity[i];
-
-        if (needsDegenerateConversion && nodes.size() == 6)
-        {
-            // 楔形（6节点）-> 退化六面体（8节点）
-            // 底面三角形: 0,1,2 -> 四边形: 0,1,2,2
-            // 顶面三角形: 3,4,5 -> 四边形: 3,4,5,5
-            outfile << nodes[0] + 1 << " " << nodes[1] + 1 << " "
-                    << nodes[2] + 1 << " " << nodes[2] + 1 << " "
-                    << nodes[3] + 1 << " " << nodes[4] + 1 << " "
-                    << nodes[5] + 1 << " " << nodes[5] + 1 << "\n";
-        }
-        else if (needsDegenerateConversion && nodes.size() == 5)
-        {
-            // 金字塔（5节点）-> 退化六面体（8节点）
-            // 底面四边形: 0,1,2,3
-            // 顶点: 4 (重复4次)
-            outfile << nodes[0] + 1 << " " << nodes[1] + 1 << " "
-                    << nodes[2] + 1 << " " << nodes[3] + 1 << " "
-                    << nodes[4] + 1 << " " << nodes[4] + 1 << " "
-                    << nodes[4] + 1 << " " << nodes[4] + 1 << "\n";
-        }
-        else
-        {
-            // 标准单元类型（直接输出）
-            int requiredNodes = nodesPerElement;
-            for (int k = 0; k < requiredNodes; ++k)
-            {
-                int idx = (k < (int)nodes.size()) ? nodes[k] : nodes.back();
-                outfile << idx + 1; // Tecplot 使用 1-based 索引
-                if (k < requiredNodes - 1)
-                    outfile << " ";
-            }
-            outfile << "\n";
-        }
-    }
-
-    outfile.close();
-    std::cout << "Tecplot file written: " << filePath
-              << " (ZoneType: " << zoneType;
-    if (needsDegenerateConversion)
-        std::cout << ", Degenerate conversion applied";
-    std::cout << ")" << std::endl;
 }
 
-inline void FiniteVolume::prepareConnectivity()
+// 计算面通量 phi = U.dot(S)
+inline FaceField<double> flux(const Field<Vector>& U)
 {
-    if (!cachedConnectivity.empty())
-        return;
+    const Mesh& mesh = U.mesh;
+    FaceField<double> faceFlow(mesh);
+    FaceField<Vector> Uf(mesh);
 
-    cachedConnectivity.assign(mesh.numCells, std::vector<int>());
+    interpolate(U, Uf);
 
-    // 为每个单元收集所有唯一的节点
-    for (int f = 0; f < (int)mesh.facePoints.size(); ++f)
+    for (size_t i = 0; i < (size_t)mesh.facePoints.size(); ++i)
     {
-        int o = mesh.owner[f];
-        for (int p : mesh.facePoints[f])
-        {
-            if (std::find(cachedConnectivity[o].begin(),
-                          cachedConnectivity[o].end(),
-                          p) == cachedConnectivity[o].end())
-                cachedConnectivity[o].push_back(p);
-        }
+        faceFlow[i] = Uf[i].dotWith(mesh.faceNormals[i]) * mesh.faceAreas[i];
+    }
+    return faceFlow;
+}
 
-        // 仅处理内部面对应的邻居单元
-        if (f < mesh.nInternalFace)
+inline Field<Vector> Grad(const Field<double>& phi)
+{
+    const Mesh& mesh = phi.mesh;
+    Field<Vector> g(mesh, Vector(0, 0, 0));
+
+    FaceField<double> phi_f(mesh);
+    interpolate(phi, phi_f);
+
+    for (size_t i = 0; i < (size_t)mesh.facePoints.size(); ++i)
+    {
+        int o = mesh.owner[i];
+        Vector flux = mesh.faceNormals[i] * mesh.faceAreas[i] * phi_f[i];
+
+        g.internalField[o] = g.internalField[o] + flux;
+        if (i < mesh.nInternalFace)
         {
-            int n = mesh.neighbour[f];
-            for (int p : mesh.facePoints[f])
-            {
-                if (std::find(cachedConnectivity[n].begin(),
-                              cachedConnectivity[n].end(),
-                              p) == cachedConnectivity[n].end())
-                    cachedConnectivity[n].push_back(p);
-            }
+            int n = mesh.neighbour[i];
+            g.internalField[n] = g.internalField[n] - flux;
         }
     }
 
-    // 检测是否为 3D 网格
-    bool is3D = false;
-    for (const auto& pt : mesh.points)
-    {
-        if (std::abs(pt.z) > 1e-10)
-        {
-            is3D = true;
-            break;
-        }
-    }
-
-    // 对节点进行排序
     for (int i = 0; i < mesh.numCells; ++i)
     {
-        auto& nodes = cachedConnectivity[i];
+        g.internalField[i] = g.internalField[i] / (mesh.cellVolumes[i] + 1e-20);
+    }
+    return g;
+}
 
-        if (is3D)
+inline Field<Tensor> Grad(const Field<Vector>& phi)
+{
+    const Mesh& mesh = phi.mesh;
+    Field<Tensor> g(mesh, Tensor());
+
+    FaceField<Vector> phi_f(mesh);
+    interpolate(phi, phi_f);
+
+    for (int i = 0; i < mesh.numFaces; ++i)
+    {
+        int o = mesh.owner[i];
+        Vector faceVector =
+            mesh.faceNormals[i] * mesh.faceAreas[i]; // S_f = n_f * A_f
+        Tensor flux = faceVector.outProductWith(phi_f[i]);
+
+        g.internalField[o] = g.internalField[o] + flux;
+        if (i < mesh.nInternalFace)
         {
-            // 3D：按 Z 坐标分层，然后在每层内按极角排序
-            if (nodes.size() >= 4)
-            {
-                Vector center = mesh.cellCentres[i];
-
-                // 按 Z 坐标排序（分为底面和顶面）
-                std::sort(nodes.begin(),
-                          nodes.end(),
-                          [&](int a, int b)
-                          { return mesh.points[a].z < mesh.points[b].z; });
-
-                // 六面体（8节点）：分别对底面和顶面排序
-                if (nodes.size() == 8)
-                {
-                    // 底面（前4个节点）按极角排序
-                    std::sort(nodes.begin(),
-                              nodes.begin() + 4,
-                              [&](int a, int b)
-                              {
-                                  return atan2(mesh.points[a].y - center.y,
-                                               mesh.points[a].x - center.x) <
-                                         atan2(mesh.points[b].y - center.y,
-                                               mesh.points[b].x - center.x);
-                              });
-
-                    // 顶面（后4个节点）按极角排序
-                    std::sort(nodes.begin() + 4,
-                              nodes.end(),
-                              [&](int a, int b)
-                              {
-                                  return atan2(mesh.points[a].y - center.y,
-                                               mesh.points[a].x - center.x) <
-                                         atan2(mesh.points[b].y - center.y,
-                                               mesh.points[b].x - center.x);
-                              });
-                }
-                // 楔形（6节点）：底面3个节点，顶面3个节点
-                else if (nodes.size() == 6)
-                {
-                    // 底面（前3个节点）按极角排序
-                    std::sort(nodes.begin(),
-                              nodes.begin() + 3,
-                              [&](int a, int b)
-                              {
-                                  return atan2(mesh.points[a].y - center.y,
-                                               mesh.points[a].x - center.x) <
-                                         atan2(mesh.points[b].y - center.y,
-                                               mesh.points[b].x - center.x);
-                              });
-
-                    // 顶面（后3个节点）按极角排序
-                    std::sort(nodes.begin() + 3,
-                              nodes.end(),
-                              [&](int a, int b)
-                              {
-                                  return atan2(mesh.points[a].y - center.y,
-                                               mesh.points[a].x - center.x) <
-                                         atan2(mesh.points[b].y - center.y,
-                                               mesh.points[b].x - center.x);
-                              });
-                }
-                // 金字塔（5节点）：底面4个节点 + 顶点1个
-                else if (nodes.size() == 5)
-                {
-                    // 底面（前4个节点）按极角排序
-                    std::sort(nodes.begin(),
-                              nodes.begin() + 4,
-                              [&](int a, int b)
-                              {
-                                  return atan2(mesh.points[a].y - center.y,
-                                               mesh.points[a].x - center.x) <
-                                         atan2(mesh.points[b].y - center.y,
-                                               mesh.points[b].x - center.x);
-                              });
-                    // 顶点（第5个节点）不需要排序
-                }
-            }
+            int n = mesh.neighbour[i];
+            g.internalField[n] = g.internalField[n] - flux;
         }
-        else
+    }
+
+    for (int i = 0; i < mesh.numCells; ++i)
+    {
+        g.internalField[i] = g.internalField[i] / (mesh.cellVolumes[i] + 1e-20);
+    }
+    return g;
+}
+} // namespace fvc
+
+namespace fvm
+{
+template <typename ValueType>
+inline void Ddt(SpaceMatrix<ValueType>& phiEqn,
+                const Properties& properties,
+                const Field<ValueType>& phi,
+                double dt)
+{
+    const Mesh& mesh = phi.mesh;
+    for (int i = 0; i < mesh.numCells; ++i)
+    {
+        ValueType trans =
+            mesh.cellVolumes[i] * properties.rho()[i] * properties.Cp()[i] / dt;
+        phiEqn.addToA(i, i, trans);
+        phiEqn.addTob(i, trans * phi.oldField()[i]);
+    }
+}
+
+template <typename ValueType>
+inline void Source(SpaceMatrix<ValueType>& Eqn, const Field<ValueType>& source)
+{
+    const Mesh& mesh = source.mesh;
+    for (size_t i = 0; i < mesh.numCells; ++i)
+    {
+        Eqn.addTob(i, source[i] * mesh.cellVolumes[i]);
+    }
+}
+
+inline double limiter_minmod(double r)
+{
+    return std::max(0.0, std::min(1.0, r));
+}
+
+inline double limiter_vanleer(double r)
+{
+    double r_abs = std::abs(r);
+    return (r + r_abs) / (1 + r_abs);
+}
+
+inline double limiter_superbee(double r)
+{
+    return std::max({0.0, std::min(1.0, 2.0 * r), std::min(2.0, r)});
+}
+
+inline double
+get_correction(Vector& gradUp, const Vector& rCf, double phiUp, double phiDown)
+{
+    double dPhi_linear = gradUp.dotWith(rCf);
+    double dPhi_jump = phiDown - phiUp;
+
+    // 避免除以极小值
+    if (std::abs(dPhi_jump) < 1e-15)
+        return 0.0;
+
+    // r 的定义：上游预测斜率与实际台阶斜率的比值
+    double r = dPhi_jump / (2.0 * dPhi_linear + 1e-15);
+
+    // 使用限制器，注意：在梯度重构中，我们需要限制的是外推量
+    // 这里采用一种更稳健的写法：直接限制面中心值在 [Up, Down] 之间
+    double psi = limiter_minmod(r);
+
+    // 如果预测方向与跳跃方向相反，psi 必为 0
+    // 如果预测过大，psi 也会通过 r 减小
+    return psi * dPhi_linear;
+}
+
+// template <typename ValueType>
+//  修改 Div 以支持单元场和面质量通量
+inline void Div(SpaceMatrix<double>& phiEqn,
+                const Properties& properties,
+                const FaceField<double>& faceFlux,
+                const Field<double>& phi)
+{
+    const Mesh& mesh = phi.mesh;
+
+    FaceField<double> faceRho(mesh);
+    fvc::interpolate(properties.rho(), faceRho);
+
+    Field<Vector> phiGrad = fvc::Grad(phi);
+
+    // 1. 内部面 (Upwind)
+    for (int i = 0; i < mesh.nInternalFace; ++i)
+    {
+        int o = mesh.owner[i];
+        int n = mesh.neighbour[i];
+        double weightFlux = faceFlux[i] * faceRho[i];
+
+        int up = (weightFlux > 0) ? o : n;
+        int down = (weightFlux > 0) ? n : o;
+
+        // 核心：基于梯度的线性重构
+        // phi_f = phi_up + psi * (grad_up . r_cf)
+        Vector rCf = mesh.faceCentres[i] - mesh.cellCentres[up];
+        double correction =
+            get_correction(phiGrad[up], rCf, phi[up], phi[down]);
+
+        // A 矩阵保持一阶上风，保证对角优势
+        phiEqn.addToA(o, up, weightFlux);  // 对o单元，外法相与Sf一致
+        phiEqn.addToA(n, up, -weightFlux); // 对o单元，外法相与Sf相反
+
+        // 高阶修正项放进 b 向量（延迟修正），放进 b 移项变为负
+        phiEqn.addTob(o, weightFlux * (-correction));
+        // 对o单元，外法相与Sf一致
+        phiEqn.addTob(n, -weightFlux * (-correction));
+        // 对o单元，外法相与Sf相反
+    }
+
+    // 2. 边界面 (根据边界流向决定使用单元值还是边界值)
+    for (int pIdx = 0; pIdx < (int)phi.boundaryList.size(); ++pIdx)
+    {
+        const auto& fvPatch = phi.boundaryList[pIdx];
+
+        if (fvPatch.boundaryType == BoundaryType::EMPTY)
+            continue;
+
+        for (int i = 0; i < fvPatch.nFaces; ++i)
         {
-            // 2D：按极角排序（原逻辑）
-            if (nodes.size() >= 3)
+            int globalFaceId = fvPatch.firstFaceIdx + i;
+            int o = mesh.owner[globalFaceId];
+            double flux = faceFlux[globalFaceId] * faceRho[globalFaceId];
+
+            if (flux > 0) // 流出
             {
-                Vector center = mesh.cellCentres[i];
-                std::sort(nodes.begin(),
-                          nodes.end(),
-                          [&](int a, int b)
-                          {
-                              return atan2(mesh.points[a].y - center.y,
-                                           mesh.points[a].x - center.x) <
-                                     atan2(mesh.points[b].y - center.y,
-                                           mesh.points[b].x - center.x);
-                          });
+                phiEqn.addToA(o, o, flux);
+            }
+            else // 流入 (通过 b 累加背景源项)
+            {
+                double phi_face = phi.getBoundaryFaceValue(globalFaceId);
+                phiEqn.addTob(o, -flux * phi_face);
             }
         }
     }
 }
+
+inline void Laplacian(SpaceMatrix<double>& phiEqn,
+                      const Field<double>& diffusionCoeff,
+                      const Field<double>& phi,
+                      bool enableNonOrthCorrection = true)
+{
+    const Mesh& mesh = phi.mesh;
+
+    FaceField<double> faceDiffusionCoeff(mesh);
+    fvc::interpolate(diffusionCoeff, faceDiffusionCoeff);
+
+    // 计算梯度场（用于非正交修正）
+    FaceField<Vector> phiGrad(mesh);
+    if (enableNonOrthCorrection)
+        fvc::interpolate(fvc::Grad(phi), phiGrad);
+
+    // 1. 内部面扩散
+    for (int i = 0; i < mesh.nInternalFace; ++i)
+    {
+        int o = mesh.owner[i];
+        int n = mesh.neighbour[i];
+
+        // 几何向量
+        Vector d = mesh.cellCentres[n] - mesh.cellCentres[o]; // 单元中心连线
+        Vector Sf = mesh.faceNormals[i] * mesh.faceAreas[i]; // 面向量
+        double magSf = mesh.faceAreas[i];                    // 面积
+
+        // === 正交部分（隐式处理，进入系数矩阵）===
+        double SfdotD = Sf.dotWith(d);
+        double deltaCoeff;
+        if (enableNonOrthCorrection)
+        {
+            // 非正交修正模式：deltaCoeff = κ|Sf|² / (Sf·d)
+            deltaCoeff =
+                faceDiffusionCoeff[i] * magSf * magSf / (SfdotD + 1e-30);
+        }
+        else
+        {
+            // 简化正交模式：deltaCoeff = κ|Sf| / |d|
+            deltaCoeff = faceDiffusionCoeff[i] * magSf / d.getMag();
+        }
+
+        // 添加到系数矩阵（隐式）
+        phiEqn.addToA(o, o, deltaCoeff);
+        phiEqn.addToA(o, n, -deltaCoeff);
+        phiEqn.addToA(n, n, deltaCoeff);
+        phiEqn.addToA(n, o, -deltaCoeff);
+
+        // === 非正交修正（显式处理，作为源项）===
+        if (enableNonOrthCorrection)
+        {
+            // 计算非正交向量：T = Sf - Δ，其中 Δ = (|Sf|² / (Sf · d)) * d
+            Vector Delta = d * (magSf * magSf / (SfdotD + 1e-30));
+            Vector Tf = Sf - Delta;
+
+            // 非正交修正项：κ * (∇φ)_f · T （显式，使用插值梯度）
+            double nonOrthCorr =
+                faceDiffusionCoeff[i] * (phiGrad[i].dotWith(Tf));
+
+            // 添加到源项（扩散项在方程左边，源项需要取负）
+            phiEqn.addTob(o, nonOrthCorr);
+            phiEqn.addTob(n, -nonOrthCorr);
+        }
+    }
+
+    // 2. 边界扩散
+    for (int pIdx = 0; pIdx < (int)mesh.boundary.size(); ++pIdx)
+    {
+        const auto& fvPatch = phi.boundaryList[pIdx];
+
+        if (fvPatch.boundaryType == BoundaryType::EMPTY)
+            continue;
+
+        for (int i = fvPatch.firstFaceIdx;
+             i < fvPatch.firstFaceIdx + fvPatch.nFaces;
+             ++i)
+        {
+            int o = mesh.owner[i];
+
+            // 几何向量
+            Vector d = mesh.faceCentres[i] - mesh.cellCentres[o];
+            Vector Sf = mesh.faceNormals[i] * mesh.faceAreas[i];
+            double magSf = mesh.faceAreas[i];
+
+            // 边界的正交系数：deltaCoeff = |Sf|² / (Sf · d)
+            double SfdotD = Sf.dotWith(d);
+            double deltaCoeff =
+                faceDiffusionCoeff[i] * magSf * magSf / (SfdotD + 1e-30);
+
+            // 应用混合边界条件：fraction * fixedValue + (1-fraction) *
+            // fixedGradient
+            double coeff_implicit = deltaCoeff * fvPatch.fraction;
+            double source_value =
+                deltaCoeff * fvPatch.fraction * fvPatch.refValue;
+            double source_grad = faceDiffusionCoeff[i] * magSf *
+                                 (1.0 - fvPatch.fraction) * fvPatch.refGrad;
+
+            phiEqn.addToA(o, o, coeff_implicit);
+            phiEqn.addTob(o, source_value + source_grad);
+        }
+    }
+}
+
+inline void Laplacian(SpaceMatrix<Vector>& phiEqn,
+                      const Field<double>& diffusionCoeff,
+                      const Field<Vector>& phi,
+                      bool enableNonOrthCorrection = true)
+{
+    const Mesh& mesh = phi.mesh;
+
+    FaceField<double> faceDiffusionCoeff(mesh);
+    fvc::interpolate(diffusionCoeff, faceDiffusionCoeff);
+
+    // 计算梯度场（用于非正交修正）
+    FaceField<Tensor> phiGrad(mesh);
+    if (enableNonOrthCorrection)
+        fvc::interpolate(fvc::Grad(phi), phiGrad);
+
+    // 1. 内部面扩散
+    for (int i = 0; i < mesh.nInternalFace; ++i)
+    {
+        int o = mesh.owner[i];
+        int n = mesh.neighbour[i];
+
+        // 几何向量
+        Vector d = mesh.cellCentres[n] - mesh.cellCentres[o]; // 单元中心连线
+        Vector Sf = mesh.faceNormals[i] * mesh.faceAreas[i]; // 面向量
+        double magSf = mesh.faceAreas[i];                    // 面积
+
+        // === 正交部分（隐式处理，进入系数矩阵）===
+        double SfdotD = Sf.dotWith(d);
+        Vector deltaCoeff;
+        if (enableNonOrthCorrection)
+        {
+            // 非正交修正模式：deltaCoeff = κ|Sf|² / (Sf·d)
+            deltaCoeff = Vector(1, 1, 1) * faceDiffusionCoeff[i] * magSf *
+                         magSf / (SfdotD + 1e-30);
+        }
+        else
+        {
+            // 简化正交模式：deltaCoeff = κ|Sf| / |d|
+            deltaCoeff =
+                Vector(1, 1, 1) * faceDiffusionCoeff[i] * magSf / d.getMag();
+        }
+
+        // 添加到系数矩阵（隐式）
+        phiEqn.addToA(o, o, deltaCoeff);
+        phiEqn.addToA(o, n, -1.0 * deltaCoeff);
+        phiEqn.addToA(n, n, deltaCoeff);
+        phiEqn.addToA(n, o, -1.0 * deltaCoeff);
+
+        // === 非正交修正（显式处理，作为源项）===
+        if (enableNonOrthCorrection)
+        {
+            // 计算非正交向量：T = Sf - Δ，其中 Δ = (|Sf|² / (Sf · d)) * d
+            Vector Delta = d * (magSf * magSf / (SfdotD + 1e-30));
+            Vector Tf = Sf - Delta;
+
+            // 非正交修正项：κ * (∇φ)_f · T （显式，使用插值梯度）
+            Vector nonOrthCorr =
+                faceDiffusionCoeff[i] * (phiGrad[i].multiply(Tf));
+
+            // 添加到源项（扩散项在方程左边，源项需要取负）
+            phiEqn.addTob(o, nonOrthCorr);
+            phiEqn.addTob(n, -1.0 * nonOrthCorr);
+        }
+    }
+
+    // 2. 边界扩散
+    for (int pIdx = 0; pIdx < (int)mesh.boundary.size(); ++pIdx)
+    {
+        const auto& fvPatch = phi.boundaryList[pIdx];
+
+        if (fvPatch.boundaryType == BoundaryType::EMPTY)
+            continue;
+
+        for (int i = fvPatch.firstFaceIdx;
+             i < fvPatch.firstFaceIdx + fvPatch.nFaces;
+             ++i)
+        {
+            int o = mesh.owner[i];
+
+            // 几何向量
+            Vector d = mesh.faceCentres[i] - mesh.cellCentres[o];
+            Vector Sf = mesh.faceNormals[i] * mesh.faceAreas[i];
+            double magSf = mesh.faceAreas[i];
+
+            // 边界的正交系数：deltaCoeff = |Sf|² / (Sf · d)
+            double SfdotD = Sf.dotWith(d);
+            Vector deltaCoeff = Vector(1, 1, 1) * faceDiffusionCoeff[i] *
+                                magSf * magSf / (SfdotD + 1e-30);
+
+            // 应用混合边界条件：fraction * fixedValue + (1-fraction) *
+            // fixedGradient
+            Vector coeff_implicit = deltaCoeff * fvPatch.fraction;
+            Vector source_value =
+                deltaCoeff * fvPatch.fraction * fvPatch.refValue;
+            Vector source_grad = faceDiffusionCoeff[i] * magSf *
+                                 (1.0 - fvPatch.fraction) * fvPatch.refGrad;
+
+            phiEqn.addToA(o, o, coeff_implicit);
+            phiEqn.addTob(o, source_value + source_grad);
+        }
+    }
+}
+
+} // namespace fvm
 
 #endif

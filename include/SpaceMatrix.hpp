@@ -135,8 +135,4 @@ public:
     }
 };
 
-using ScalarMatrix = SpaceMatrix<double>;
-using VectorMatrix = SpaceMatrix<Vector>;
-using TensorMatrix = SpaceMatrix<Tensor>;
-
 #endif
